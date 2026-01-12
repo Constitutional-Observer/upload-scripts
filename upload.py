@@ -1,6 +1,6 @@
 import argparse
 import json
-from itertools import batched
+from more_itertools import chunked
 from pathlib import Path
 
 import typesense
@@ -35,12 +35,10 @@ def create_collection():
         client.collections['legislature_debates'].retrieve()
     except Exception:
         print("Collection does not exist, will be created")
-    else:
-        print("Collection already exists, will be recreated")
-        client.collections["legislature_debates"].delete()
-    finally:
         client.collections.create(schema)
         print("Created collection!")
+    else:
+        print("Collection already exists")
 
 def upload_documents_from_path(files_path: Path):
     if not files_path.is_dir():
@@ -62,7 +60,7 @@ def upload_documents_from_path(files_path: Path):
     files = list(files_path.iterdir())
     failures = []
 
-    for file_batch in tqdm(batched(enumerate(files), 10), total=len(files) // 10):
+    for file_batch in tqdm(chunked(enumerate(files), 10), total=len(files) // 10):
         docs_to_upload = []
         for i, file in file_batch:
             with open(file) as f:
