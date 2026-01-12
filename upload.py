@@ -1,4 +1,5 @@
 import argparse
+import json
 from itertools import batched
 from pathlib import Path
 
@@ -19,22 +20,27 @@ def create_collection():
         }
     )
     schema = {
-        "name": "up_legislature",
+        "name": "legislature_debates",
         "fields": [
-            {"name": "year", "type": "int32", "facet": True},
-            {"name": "month", "type": "int32", "facet": True},
-            {"name": "day", "type": "int32", "facet": True},
+            { "name": "state_code", "type": "string" },
+            { "name": "file_name", "type": "string" },
             {
                 "name": "discussion",
                 "type": "string",
-                "locale": "hi",
             },
         ],
-        "default_sorting_field": "year",
     }
 
-    client.collections["up_legislature"].delete()
-    client.collections.create(schema)
+    try:
+        client.collections['legislature_debates'].retrieve()
+    except Exception:
+        print("Collection does not exist, will be created")
+    else:
+        print("Collection already exists, will be recreated")
+        client.collections["legislature_debates"].delete()
+    finally:
+        client.collections.create(schema)
+        print("Created collection!")
 
 def upload_documents_from_path(files_path: Path):
     if not files_path.is_dir():
@@ -52,17 +58,25 @@ def upload_documents_from_path(files_path: Path):
             "connection_timeout_seconds": 5,
         }
     )
+    state_code = files_path.stem[-2].split("-")[0]
     files = list(files_path.iterdir())
+    failures = []
+
     for file_batch in tqdm(batched(enumerate(files), 10), total=len(files) // 10):
         docs_to_upload = []
         for i, file in file_batch:
-            day, month, year = map(int, file.name.split("_")[0].split("-"))
             with open(file) as f:
                 text = f.read()
-            docs_to_upload.append({"id": str(i), "year": year, "month": month, "day": day, "discussion": text})
-        result = client.collections["up_legislature"].documents.import_(docs_to_upload)
+            docs_to_upload.append({"id": str(i), "state_code": state_code, "file_name": file.name, "discussion": text})
+        result = client.collections["legislature_debates"].documents.import_(docs_to_upload)
         if not all(map(lambda x: x["success"], result)):
             print("failed to upload: ", file_batch)
+            failures.append(result)
+
+    if len(failures) > 0:
+        print("Some errors occured while uploading the files. Error log will be written to 'errors.json'")
+        with open("errors.json", "w") as f:
+            json.dump(failures, f)
 
 
 def main():
