@@ -65,7 +65,14 @@ def upload_documents_from_path(files_path: Path):
         for i, file in file_batch:
             with open(file) as f:
                 text = f.read()
-            docs_to_upload.append({"id": str(i), "state_code": state_code, "file_name": file.name, "discussion": text})
+            docs_to_upload.append(
+                {
+                    "id": f"{state_code}-{file.name}",
+                    "state_code": state_code,
+                    "file_name": file.name,
+                    "discussion": text,
+                }
+            )
         result = client.collections["legislature_debates"].documents.import_(docs_to_upload)
         if not all(map(lambda x: x["success"], result)):
             print("failed to upload: ", file_batch)
