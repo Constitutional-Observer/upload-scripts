@@ -56,7 +56,7 @@ def upload_documents_from_path(files_path: Path):
             "connection_timeout_seconds": 5,
         }
     )
-    state_code = files_path.stem[-2].split("-")[0]
+    state_code = files_path.parents[0].name
     files = list(files_path.iterdir())
     failures = []
 
