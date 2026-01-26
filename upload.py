@@ -27,6 +27,7 @@ def upload_documents_from_path(files_path: Path):
             "connection_timeout_seconds": 5,
         }
     )
+    state_code = files_path.name
     metadata = files_path / "all_metadata.json"  # JSONL file
     with open(metadata) as f:
         metadata_text = f.read()
@@ -36,14 +37,14 @@ def upload_documents_from_path(files_path: Path):
             if file["name"].endswith("_djvu.txt"):
                 file_name = file["name"]
                 break
-        metadata = get_state_metadata(item["state_code"], item["metadata"])
+        metadata = get_state_metadata(item[state_code], item["metadata"])
         discussion_text = files_path / "downloads" / file_name
         with open(discussion_text) as f:
             discussion_text = f.read()
         file_chunks = chunk_file(discussion_text)
         for chunk_id, chunk in enumerate(file_chunks):
             item_to_upload = metadata.copy()
-            item_to_upload["id"] = f"{item['state_code']}_{file_name}_{chunk_id}"
+            item_to_upload["id"] = f"{item[state_code]}_{file_name}_{chunk_id}"
             item_to_upload["discussions"] = chunk
             client.collections["legislature"].documents.upsert(item_to_upload)
 
