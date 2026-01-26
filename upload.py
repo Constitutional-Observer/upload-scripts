@@ -37,7 +37,7 @@ def upload_documents_from_path(files_path: Path):
             if file["name"].endswith("_djvu.txt"):
                 file_name = file["name"]
                 break
-        metadata = get_state_metadata(item[state_code], item["metadata"])
+        metadata = get_state_metadata(state_code, item["metadata"])
         discussion_text = files_path / "downloads" / file_name
         with open(discussion_text) as f:
             discussion_text = f.read()
