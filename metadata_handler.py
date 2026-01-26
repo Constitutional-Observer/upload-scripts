@@ -34,6 +34,8 @@ class LegislatureMetadata(TypedDict):
 
 METADATA_SCHEMA = {
     "AP": [
+        {"discussions": "string", "locale": "te"}
+        {"schema_version": "int"},
         {"title_en": "string"},
         {"year": "int32"},
         {"month": "int32"},
@@ -125,3 +127,7 @@ def normalize_metadata_ap(metadata: dict) -> LegislatureMetadata:
         "term_end": term_end,
         "archive_link": metadata.get("identifier-access", "") or metadata.get("source", "")
     }
+
+def get_state_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
+    if state_code == "AP":
+        return normalize_metadata_ap(metadata)
