@@ -1,16 +1,15 @@
 import argparse
 import json
-from more_itertools import chunked
 from pathlib import Path
 
 import typesense
-from tqdm import tqdm
 
 from metadata_handler import get_state_metadata
 
 
 def chunk_file(file_text: str) -> list[str]:
     return list(file_text.split("\n\n"))
+
 
 def upload_documents_from_path(files_path: Path):
     if not files_path.is_dir():
@@ -28,7 +27,7 @@ def upload_documents_from_path(files_path: Path):
             "connection_timeout_seconds": 5,
         }
     )
-    metadata = files_path / "all_metadata.json" # JSONL file
+    metadata = files_path / "all_metadata.json"  # JSONL file
     with open(metadata) as f:
         metadata_text = f.read()
     metadata = map(json.loads, metadata_text.splitlines())
@@ -48,6 +47,7 @@ def upload_documents_from_path(files_path: Path):
             item_to_upload["discussions"] = chunk
             client.collections["legislature"]["documents"].import_(item_to_upload)
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("filename")
@@ -57,6 +57,7 @@ def main():
 
     create_collection()
     upload_documents_from_path(path)
+
 
 if __name__ == "__main__":
     main()
