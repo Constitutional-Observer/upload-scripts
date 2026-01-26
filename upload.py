@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import typesense
+from tqdm import tqdm
 
 from metadata_handler import get_state_metadata
 
@@ -31,8 +32,9 @@ def upload_documents_from_path(files_path: Path):
     metadata = files_path / "all_metadata.json"  # JSONL file
     with open(metadata) as f:
         metadata_text = f.read()
-    metadata = map(json.loads, metadata_text.splitlines())
-    for item in metadata:
+    metadata = list(map(json.loads, metadata_text.splitlines()))
+    responses = []
+    for item in tqdm(metadata):
         for file in item["files"]:
             if file["name"].endswith("_djvu.txt"):
                 file_name = file["name"]
@@ -42,11 +44,18 @@ def upload_documents_from_path(files_path: Path):
         with open(discussion_text) as f:
             discussion_text = f.read()
         file_chunks = chunk_file(discussion_text)
+        items_to_upload = []
         for chunk_id, chunk in enumerate(file_chunks):
             item_to_upload = metadata.copy()
-            item_to_upload["id"] = f"{item[state_code]}_{file_name}_{chunk_id}"
+            item_to_upload["id"] = f"{state_code}_{file_name}_{chunk_id}"
             item_to_upload["discussions"] = chunk
-            client.collections["legislature"].documents.upsert(item_to_upload)
+            item_to_upload["file_name"] = file_name
+            items_to_upload.append(item_to_upload)
+        response = client.collections[f"state_legislature_debates_{state_code.lower()}"].documents.upsert(item_to_upload)
+        responses.append(response)
+    with open(f"typesense_upload_{state_code}.json", "w") as f:
+        json.dump(responses, f)
+
 
 
 def main():
