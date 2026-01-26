@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import TypedDict
 import re
 
 
@@ -8,7 +8,7 @@ AP_SESSION_RE = re.compile(r"Session (\d+)")
 AP_TERM_RE = re.compile(r"([A-Za-z]+) Andhra Pradesh Assembly \((\d{4})-(\d{4})\)")
 
 class LegislatureMetadata(TypedDict):
-    state_code: Literal["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB"]
+    state_code: str
     languages: list[str]
 
     year: int
@@ -32,30 +32,51 @@ class LegislatureMetadata(TypedDict):
     
     archive_link: str
 
-METADATA_SCHEMA = {
-    "AP": [
-        {"discussions": "string", "locale": "te"}
-        {"schema_version": "int"},
-        {"title_en": "string"},
-        {"year": "int32"},
-        {"month": "int32"},
-        {"day": "int32"},
-        {"house": "string"},
-        {"session": "int32"},
-        {"sitting_number": "int32"},
-        {"sitting_start_year": "int32"},
-        {"sitting_start_month": "int32"},
-        {"sitting_start_day": "int32"},
-        {"sitting_end_year": "int32"},
-        {"sitting_end_month": "int32"},
-        {"sitting_end_day": "int32"},
-        {"term_number": "int32"},
-        {"term_start": "int32"},
-        {"term_end": "int32"},
-        {"archive_link": "string"},
-    ],
-    # ... other states ...
+STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB"]
+
+BASE_FIELDS = [
+    {"name": "state_code", "type": "string", "facet": True},
+    {"name": "file_name", "type": "string"},
+    {"name": "year", "type": "int32", "facet": True},
+    {"name": "month", "type": "int32", "facet": True},
+    {"name": "day", "type": "int32", "facet": True},
+    {"name": "title_en", "type": "string"},
+    {"name": "archive_link", "type": "string"},
+]
+
+STATE_LOCALES = {
+    "AP": "te",
+    "AS": "as",
+    "RJ": "hi",
+    "KA": "kn",
+    "KL": "ml",
+    "TN": "ta",
+    "TS": "te",
+    "UP": "hi",
+    "WB": "bn",
 }
+
+METADATA_SCHEMA = {
+    state: [
+        {"name": "discussions", "type": "string", "locale": locale},
+    ] for state, locale in STATE_LOCALES.items()
+}
+
+# Add state-specific fields for AP
+METADATA_SCHEMA["AP"].extend([
+    {"name": "house", "type": "string", "facet": True},
+    {"name": "session", "type": "int32", "facet": True},
+    {"name": "sitting_number", "type": "int32"},
+    {"name": "sitting_start_year", "type": "int32"},
+    {"name": "sitting_start_month", "type": "int32"},
+    {"name": "sitting_start_day", "type": "int32"},
+    {"name": "sitting_end_year", "type": "int32"},
+    {"name": "sitting_end_month", "type": "int32"},
+    {"name": "sitting_end_day", "type": "int32"},
+    {"name": "term_number", "type": "int32", "facet": True},
+    {"name": "term_start", "type": "int32"},
+    {"name": "term_end", "type": "int32"},
+])
 
 def word_to_num(word: str) -> int:
     w2n = {
