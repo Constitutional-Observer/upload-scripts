@@ -6,39 +6,11 @@ from pathlib import Path
 import typesense
 from tqdm import tqdm
 
-def create_collection():
-    client = typesense.Client(
-        {
-            "nodes": [
-                {
-                    "host": "localhost",  # IP address of Typesense server
-                    "port": "8108",  # Default port
-                    "protocol": "http",  # or 'https'
-                }
-            ],
-            "api_key": "xyz",  # API key for accessing your Typesense server
-        }
-    )
-    schema = {
-        "name": "legislature_debates",
-        "fields": [
-            { "name": "state_code", "type": "string" },
-            { "name": "file_name", "type": "string" },
-            {
-                "name": "discussion",
-                "type": "string",
-            },
-        ],
-    }
+from metadata_handler import get_state_metadata
 
-    try:
-        client.collections['legislature_debates'].retrieve()
-    except Exception:
-        print("Collection does not exist, will be created")
-        client.collections.create(schema)
-        print("Created collection!")
-    else:
-        print("Collection already exists")
+
+def chunk_file(file_text: str) -> list[str]:
+    return list(file_text.split("\n\n"))
 
 def upload_documents_from_path(files_path: Path):
     if not files_path.is_dir():
@@ -56,33 +28,25 @@ def upload_documents_from_path(files_path: Path):
             "connection_timeout_seconds": 5,
         }
     )
-    state_code = files_path.parents[0].name
-    files = list(files_path.iterdir())
-    failures = []
-
-    for file_batch in tqdm(chunked(enumerate(files), 10), total=len(files) // 10):
-        docs_to_upload = []
-        for i, file in file_batch:
-            with open(file) as f:
-                text = f.read()
-            docs_to_upload.append(
-                {
-                    "id": f"{state_code}-{file.name}",
-                    "state_code": state_code,
-                    "file_name": file.name,
-                    "discussion": text,
-                }
-            )
-        result = client.collections["legislature_debates"].documents.import_(docs_to_upload)
-        if not all(map(lambda x: x["success"], result)):
-            print("failed to upload: ", file_batch)
-            failures.append(result)
-
-    if len(failures) > 0:
-        print("Some errors occured while uploading the files. Error log will be written to 'errors.json'")
-        with open("errors.json", "w") as f:
-            json.dump(failures, f)
-
+    metadata = files_path / "all_metadata.json" # JSONL file
+    with open(metadata) as f:
+        metadata_text = f.read()
+    metadata = map(json.loads, metadata_text.splitlines())
+    for item in metadata:
+        for file in item["files"]:
+            if file["name"].endswith("_djvu.txt"):
+                file_name = file["name"]
+                break
+        metadata = get_state_metadata(item["state_code"], item["metadata"])
+        discussion_text = files_path / "downloads" / file_name
+        with open(discussion_text) as f:
+            discussion_text = f.read()
+        file_chunks = chunk_file(discussion_text)
+        for chunk_id, chunk in enumerate(file_chunks):
+            item_to_upload = metadata.copy()
+            item_to_upload["id"] = f"{item['state_code']}_{file_name}_{chunk_id}"
+            item_to_upload["discussions"] = chunk
+            client.collections["legislature"]["documents"].import_(item_to_upload)
 
 def main():
     parser = argparse.ArgumentParser()
