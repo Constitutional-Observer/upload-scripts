@@ -45,7 +45,7 @@ def upload_documents_from_path(files_path: Path):
             item_to_upload = metadata.copy()
             item_to_upload["id"] = f"{item['state_code']}_{file_name}_{chunk_id}"
             item_to_upload["discussions"] = chunk
-            client.collections["legislature"]["documents"].import_(item_to_upload)
+            client.collections["legislature"].documents.upsert(item_to_upload)
 
 
 def main():
@@ -55,7 +55,6 @@ def main():
 
     path = Path(args.filename)
 
-    create_collection()
     upload_documents_from_path(path)
 
 
