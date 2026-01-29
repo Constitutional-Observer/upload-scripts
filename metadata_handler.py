@@ -3,9 +3,12 @@ import re
 
 
 AP_DATE_RE = re.compile(r"Assembly - Day \d+\((\d{1,2})/(\d{1,2})/(\d{4})\)")
-AP_SITTING_NAME_RE = re.compile(r"sitting (\d+)\((\d{1,2})/(\d{1,2})/(\d{4}) to (\d{1,2})/(\d{1,2})/(\d{4})\)")
+AP_SITTING_NAME_RE = re.compile(
+    r"sitting (\d+)\((\d{1,2})/(\d{1,2})/(\d{4}) to (\d{1,2})/(\d{1,2})/(\d{4})\)"
+)
 AP_SESSION_RE = re.compile(r"Session (\d+)")
 AP_TERM_RE = re.compile(r"([A-Za-z]+) Andhra Pradesh Assembly \((\d{4})-(\d{4})\)")
+
 
 class LegislatureMetadata(TypedDict):
     state_code: str
@@ -15,22 +18,23 @@ class LegislatureMetadata(TypedDict):
     month: int
     day: int
     title_en: str
-    
+
     # AP Specific
-    house: str
-    session: int
-    sitting_number: int
-    sitting_start_year: int
-    sitting_start_month: int
-    sitting_start_day: int
-    sitting_end_year: int
-    sitting_end_month: int
-    sitting_end_day: int
-    term_number: int
-    term_start: int
-    term_end: int
-    
+    house: str | None
+    session: int | None
+    sitting_number: int | None
+    sitting_start_year: int | None
+    sitting_start_month: int | None
+    sitting_start_day: int | None
+    sitting_end_year: int | None
+    sitting_end_month: int | None
+    sitting_end_day: int | None
+    term_number: int | None
+    term_start: int | None
+    term_end: int | None
+
     archive_link: str
+
 
 STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB"]
 
@@ -59,38 +63,58 @@ STATE_LOCALES = {
 METADATA_SCHEMA = {
     state: [
         {"name": "discussions", "type": "string", "locale": locale},
-    ] for state, locale in STATE_LOCALES.items()
+    ]
+    for state, locale in STATE_LOCALES.items()
 }
 
 # Add state-specific fields for AP
-METADATA_SCHEMA["AP"].extend([
-    {"name": "house", "type": "string", "facet": True},
-    {"name": "session", "type": "int32", "facet": True},
-    {"name": "sitting_number", "type": "int32"},
-    {"name": "sitting_start_year", "type": "int32"},
-    {"name": "sitting_start_month", "type": "int32"},
-    {"name": "sitting_start_day", "type": "int32"},
-    {"name": "sitting_end_year", "type": "int32"},
-    {"name": "sitting_end_month", "type": "int32"},
-    {"name": "sitting_end_day", "type": "int32"},
-    {"name": "term_number", "type": "int32", "facet": True},
-    {"name": "term_start", "type": "int32"},
-    {"name": "term_end", "type": "int32"},
-])
+METADATA_SCHEMA["AP"].extend(
+    [
+        {"name": "house", "type": "string", "facet": True},
+        {"name": "session", "type": "int32", "facet": True},
+        {"name": "sitting_number", "type": "int32"},
+        {"name": "sitting_start_year", "type": "int32"},
+        {"name": "sitting_start_month", "type": "int32"},
+        {"name": "sitting_start_day", "type": "int32"},
+        {"name": "sitting_end_year", "type": "int32"},
+        {"name": "sitting_end_month", "type": "int32"},
+        {"name": "sitting_end_day", "type": "int32"},
+        {"name": "term_number", "type": "int32", "facet": True},
+        {"name": "term_start", "type": "int32"},
+        {"name": "term_end", "type": "int32"},
+    ]
+)
+
 
 def word_to_num(word: str) -> int:
     w2n = {
-        "First": 1, "Second": 2, "Third": 3, "Fourth": 4, "Fifth": 5,
-        "Sixth": 6, "Seventh": 7, "Eighth": 8, "Ninth": 9, "Tenth": 10,
-        "Eleventh": 11, "Twelfth": 12, "Thirteenth": 13, "Fourteenth": 14,
-        "Fifteenth": 15, "Sixteenth": 16, "Seventeenth": 17, "Eighteenth": 18,
-        "Nineteenth": 19, "Twentieth": 20,
+        "First": 1,
+        "Second": 2,
+        "Third": 3,
+        "Fourth": 4,
+        "Fifth": 5,
+        "Sixth": 6,
+        "Seventh": 7,
+        "Eighth": 8,
+        "Ninth": 9,
+        "Tenth": 10,
+        "Eleventh": 11,
+        "Twelfth": 12,
+        "Thirteenth": 13,
+        "Fourteenth": 14,
+        "Fifteenth": 15,
+        "Sixteenth": 16,
+        "Seventeenth": 17,
+        "Eighteenth": 18,
+        "Nineteenth": 19,
+        "Twentieth": 20,
     }
     return w2n.get(word, 0)
 
+
 def normalize_metadata_ap(metadata: dict) -> LegislatureMetadata:
     # Metadata handler for AP
-    
+
     # Date extraction (Title)
     # Example: "Assembly - Day 1(01/12/2011)"
     match = AP_DATE_RE.search(metadata.get("title", ""))
@@ -106,7 +130,9 @@ def normalize_metadata_ap(metadata: dict) -> LegislatureMetadata:
 
     # Sitting
     # Example: "sitting 1(01/12/2011 to 05/12/2011)"
-    sitting_match = AP_SITTING_NAME_RE.search(metadata.get("ap_legislature_sitting", ""))
+    sitting_match = AP_SITTING_NAME_RE.search(
+        metadata.get("ap_legislature_sitting", "")
+    )
     if sitting_match:
         sitting_num = int(sitting_match.group(1))
         s_start_d, s_start_m, s_start_y = map(int, sitting_match.group(2, 3, 4))
@@ -146,9 +172,44 @@ def normalize_metadata_ap(metadata: dict) -> LegislatureMetadata:
         "term_number": term_number,
         "term_start": term_start,
         "term_end": term_end,
-        "archive_link": metadata.get("identifier-access", "") or metadata.get("source", "")
+        "archive_link": metadata.get("identifier-access", "")
+        or metadata.get("source", ""),
     }
 
-def get_state_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
-    if state_code == "AP":
-        return normalize_metadata_ap(metadata)
+
+def normalize_metadata_as(metadata: dict) -> LegislatureMetadata:
+    year, month, day = metadata["date"].split("-")
+    return {
+        "state_code": "AS",
+        "languages": metadata.get("language", []),
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": "",
+        "house": None,
+        "session": None,
+        "sitting_number": None,
+        "sitting_start_year": None,
+        "sitting_start_month": None,
+        "sitting_start_day": None,
+        "sitting_end_year": None,
+        "sitting_end_month": None,
+        "sitting_end_day": None,
+        "term_number": None,
+        "term_start": None,
+        "term_end": None,
+        "archive_link": metadata["identifier-access"],
+    }
+
+
+def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
+    """
+    Normalise the metadata, since each state has its own format
+    """
+    match state_code:
+        case "AP":
+            return normalize_metadata_ap(metadata)
+        case "AS":
+            return normalize_metadata_as(metadata)
+        case _:
+            raise NotImplementedError()
