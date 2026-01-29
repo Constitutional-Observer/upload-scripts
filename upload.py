@@ -60,7 +60,7 @@ def upload_documents_from_path(files_path: Path):
             items_to_upload.append(item_to_upload)
         response = client.collections[
             f"state_legislature_debates_{state_code.lower()}"
-        ].documents.upsert(items_to_upload)
+        ].documents.import_(items_to_upload)
         responses.append(response)
     with open(f"typesense_upload_{state_code}.json", "w") as f:
         json.dump(responses, f)
