@@ -5,7 +5,7 @@ from pathlib import Path
 import typesense
 from tqdm import tqdm
 
-from metadata_handler import get_state_metadata
+from metadata_handler import normalize_metadata
 
 
 def chunk_file(file_text: str) -> list[str]:
@@ -39,7 +39,7 @@ def upload_documents_from_path(files_path: Path):
             if file["name"].endswith("_djvu.txt"):
                 file_name = file["name"]
                 break
-        metadata = get_state_metadata(state_code, item["metadata"])
+        metadata = normalize_metadata(state_code, item["metadata"])
         discussion_text = files_path / "downloads" / file_name
         with open(discussion_text) as f:
             discussion_text = f.read()
@@ -51,11 +51,12 @@ def upload_documents_from_path(files_path: Path):
             item_to_upload["discussions"] = chunk
             item_to_upload["file_name"] = file_name
             items_to_upload.append(item_to_upload)
-        response = client.collections[f"state_legislature_debates_{state_code.lower()}"].documents.upsert(item_to_upload)
+        response = client.collections[
+            f"state_legislature_debates_{state_code.lower()}"
+        ].documents.upsert(item_to_upload)
         responses.append(response)
     with open(f"typesense_upload_{state_code}.json", "w") as f:
         json.dump(responses, f)
-
 
 
 def main():
