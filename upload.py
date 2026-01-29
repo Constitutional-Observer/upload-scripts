@@ -1,5 +1,6 @@
 import argparse
 import json
+import traceback
 from pathlib import Path
 
 import typesense
@@ -34,12 +35,18 @@ def upload_documents_from_path(files_path: Path):
         metadata_text = f.read()
     metadata = list(map(json.loads, metadata_text.splitlines()))
     responses = []
+    metadata_errors = []
     for item in tqdm(metadata):
         for file in item["files"]:
             if file["name"].endswith("_djvu.txt"):
                 file_name = file["name"]
                 break
-        metadata = normalize_metadata(state_code, item["metadata"])
+        try:
+            metadata = normalize_metadata(state_code, item["metadata"])
+        except Exception as e:
+            traceback.print_exc()
+            metadata_errors.append({"file": file_name, "error": str(e)})
+
         discussion_text = files_path / "downloads" / file_name
         with open(discussion_text) as f:
             discussion_text = f.read()
@@ -53,10 +60,12 @@ def upload_documents_from_path(files_path: Path):
             items_to_upload.append(item_to_upload)
         response = client.collections[
             f"state_legislature_debates_{state_code.lower()}"
-        ].documents.upsert(item_to_upload)
+        ].documents.upsert(items_to_upload)
         responses.append(response)
     with open(f"typesense_upload_{state_code}.json", "w") as f:
         json.dump(responses, f)
+    with open(f"{state_code}_metadata_errors.json", "w") as f:
+        json.dump(metadata_errors, f)
 
 
 def main():
