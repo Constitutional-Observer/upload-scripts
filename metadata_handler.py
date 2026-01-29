@@ -178,7 +178,7 @@ def normalize_metadata_ap(metadata: dict) -> LegislatureMetadata:
 
 
 def normalize_metadata_as(metadata: dict) -> LegislatureMetadata:
-    year, month, day = metadata["date"].split("-")
+    year, month, day = map(int, metadata["date"].split("-"))
     return {
         "state_code": "AS",
         "languages": metadata.get("language", []),
