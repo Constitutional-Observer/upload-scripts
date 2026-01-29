@@ -60,7 +60,11 @@ def print_collections_info(states):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["delete", "create", "print_schema"])
-    parser.add_argument("--states", nargs="+", help="States to perform action on (e.g. AP TS). Defaults to all if not specified.")
+    parser.add_argument(
+        "--states",
+        nargs="+",
+        help="States to perform action on (e.g. AP TS). Defaults to all if not specified.",
+    )
     args = parser.parse_args()
 
     states = args.states if args.states else STATE_CODES
