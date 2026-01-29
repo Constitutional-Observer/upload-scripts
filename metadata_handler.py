@@ -9,6 +9,9 @@ AP_SITTING_NAME_RE = re.compile(
 AP_SESSION_RE = re.compile(r"Session (\d+)")
 AP_TERM_RE = re.compile(r"([A-Za-z]+) Andhra Pradesh Assembly \((\d{4})-(\d{4})\)")
 
+KA_TERM_RE = re.compile(r"(\d+)\[(\d{4})-(\d{4})\]")
+KA_SESSION_RE = re.compile(r"(\d+)\[\d{4}\]")
+
 
 class LegislatureMetadata(TypedDict):
     state_code: str
@@ -34,6 +37,17 @@ class LegislatureMetadata(TypedDict):
     term_end: int | None
 
     archive_link: str
+    section_type: str | None
+    start_page: int | None
+    end_page: int | None
+    book_id: int | None
+    place_session: str | None
+    minister_en: str | None
+    minister_kn: str | None
+    questioner_en: str | None
+    questioner_kn: str | None
+    participants_en: str | None
+    participants_kn: str | None
 
 
 STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB"]
@@ -82,6 +96,27 @@ METADATA_SCHEMA["AP"].extend(
         {"name": "term_number", "type": "int32", "facet": True},
         {"name": "term_start", "type": "int32"},
         {"name": "term_end", "type": "int32"},
+    ]
+)
+
+# Add state-specific fields for KA
+METADATA_SCHEMA["KA"].extend(
+    [
+        {"name": "session", "type": "int32", "facet": True},
+        {"name": "term_number", "type": "int32", "facet": True},
+        {"name": "term_start", "type": "int32"},
+        {"name": "term_end", "type": "int32"},
+        {"name": "section_type", "type": "string", "facet": True},
+        {"name": "start_page", "type": "int32"},
+        {"name": "end_page", "type": "int32"},
+        {"name": "book_id", "type": "int32"},
+        {"name": "place_session", "type": "string", "facet": True},
+        {"name": "minister_en", "type": "string"},
+        {"name": "minister_kn", "type": "string", "locale": "kn"},
+        {"name": "questioner_en", "type": "string"},
+        {"name": "questioner_kn", "type": "string", "locale": "kn"},
+        {"name": "participants_en", "type": "string"},
+        {"name": "participants_kn", "type": "string", "locale": "kn"},
     ]
 )
 
@@ -199,6 +234,77 @@ def normalize_metadata_as(metadata: dict) -> LegislatureMetadata:
         "term_start": None,
         "term_end": None,
         "archive_link": metadata["identifier-access"],
+        "section_type": None,
+        "start_page": None,
+        "end_page": None,
+        "book_id": None,
+        "place_session": None,
+        "minister_en": None,
+        "minister_kn": None,
+        "questioner_en": None,
+        "questioner_kn": None,
+        "participants_en": None,
+        "participants_kn": None,
+    }
+
+
+def normalize_metadata_ka(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for KA
+    date_str = metadata.get("date", "0000-00-00")
+    try:
+        year, month, day = map(int, date_str.split("-"))
+    except (ValueError, AttributeError):
+        year, month, day = 0, 0, 0
+
+    # Term
+    # Example: "13[2008-2013]"
+    term_match = KA_TERM_RE.search(metadata.get("kla_assemblynumber", ""))
+    if term_match:
+        term_number = int(term_match.group(1))
+        term_start = int(term_match.group(2))
+        term_end = int(term_match.group(3))
+    else:
+        term_number, term_start, term_end = 0, 0, 0
+
+    # Session
+    # Example: "3[2009]"
+    session_match = KA_SESSION_RE.search(metadata.get("kla_sessionnumber", ""))
+    session = int(session_match.group(1)) if session_match else 0
+
+    return {
+        "state_code": "KA",
+        "languages": metadata.get("language", []),
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": metadata.get("kla_debate_title_subject_eng", ""),
+        # Extra fields for KA
+        "discussions": metadata.get("kla_debate_title_subject_kan", ""),
+        "house": "Legislative Assembly",
+        "session": session,
+        "sitting_number": None,
+        "sitting_start_year": None,
+        "sitting_start_month": None,
+        "sitting_start_day": None,
+        "sitting_end_year": None,
+        "sitting_end_month": None,
+        "sitting_end_day": None,
+        "term_number": term_number,
+        "term_start": term_start,
+        "term_end": term_end,
+        "archive_link": metadata.get("identifier-access", "")
+        or metadata.get("source", ""),
+        "section_type": metadata.get("kla_sectiontype"),
+        "start_page": int(metadata.get("kla_startpage", 0)),
+        "end_page": int(metadata.get("kla_endpage", 0)),
+        "book_id": int(metadata.get("kla_bookid", 0)),
+        "place_session": metadata.get("kla_placesession"),
+        "minister_en": metadata.get("kla_minister_name_eng"),
+        "minister_kn": metadata.get("kla_minister_name_kan"),
+        "questioner_en": metadata.get("kla_questioner_name_eng"),
+        "questioner_kn": metadata.get("kla_questioner_name_kan"),
+        "participants_en": metadata.get("kla_debate_participants_eng"),
+        "participants_kn": metadata.get("kla_debate_participants_kan"),
     }
 
 
@@ -211,5 +317,7 @@ def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_ap(metadata)
         case "AS":
             return normalize_metadata_as(metadata)
+        case "KA":
+            return normalize_metadata_ka(metadata)
         case _:
             raise NotImplementedError()
