@@ -21,6 +21,7 @@ class LegislatureMetadata(TypedDict):
     month: int
     day: int
     title_en: str
+    archive_link: str
 
     # AP Specific
     house: str | None
@@ -36,7 +37,6 @@ class LegislatureMetadata(TypedDict):
     term_start: int | None
     term_end: int | None
 
-    archive_link: str
     section_type: str | None
     start_page: int | None
     end_page: int | None
@@ -117,6 +117,15 @@ METADATA_SCHEMA["KA"].extend(
         {"name": "questioner_kn", "type": "string", "locale": "kn"},
         {"name": "participants_en", "type": "string"},
         {"name": "participants_kn", "type": "string", "locale": "kn"},
+    ]
+)
+
+# Add state-specific fields for KL (Kerala)
+# KL has a simpler metadata structure
+METADATA_SCHEMA["KL"].extend(
+    [
+        {"name": "discussions", "type": "string", "locale": "ml"},
+        {"name": "subject", "type": "string"},
     ]
 )
 
@@ -307,6 +316,59 @@ def normalize_metadata_ka(metadata: dict) -> LegislatureMetadata:
     }
 
 
+def normalize_metadata_kl(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for KL (Kerala)
+    # KL has a simpler metadata structure compared to other states
+    
+    # Date extraction (date field is in YYYY-MM-DD format)
+    date_str = metadata.get("date", "0000-00-00")
+    try:
+        year, month, day = map(int, date_str.split("-"))
+    except (ValueError, AttributeError):
+        year, month, day = 0, 0, 0
+
+    # Extract subjects as a comma-separated string
+    subject_list = metadata.get("subject", [])
+    subjects = ", ".join(subject_list) if isinstance(subject_list, list) else str(subject_list)
+
+    return {
+        "state_code": "KL",
+        "languages": metadata.get("languages", []),
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": metadata.get("title", ""),
+        # KL-specific fields
+        "discussions": metadata.get("description", ""),
+        "subject": subjects,
+        # Most other fields are not available in KL metadata
+        "house": None,
+        "session": None,
+        "sitting_number": None,
+        "sitting_start_year": None,
+        "sitting_start_month": None,
+        "sitting_start_day": None,
+        "sitting_end_year": None,
+        "sitting_end_month": None,
+        "sitting_end_day": None,
+        "term_number": None,
+        "term_start": None,
+        "term_end": None,
+        "archive_link": metadata["identifier-access"],
+        "section_type": None,
+        "start_page": None,
+        "end_page": None,
+        "book_id": None,
+        "place_session": None,
+        "minister_en": None,
+        "minister_kn": None,
+        "questioner_en": None,
+        "questioner_kn": None,
+        "participants_en": None,
+        "participants_kn": None,
+    }
+
+
 def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
     """
     Normalise the metadata, since each state has its own format
@@ -318,5 +380,7 @@ def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_as(metadata)
         case "KA":
             return normalize_metadata_ka(metadata)
+        case "KL":
+            return normalize_metadata_kl(metadata)
         case _:
             raise NotImplementedError()
