@@ -15,6 +15,10 @@ KA_SESSION_RE = re.compile(r"(\d+)\[\d{4}\]")
 RJ_ASSEMBLY_RE = re.compile(r"Assembly (\d+)")
 RJ_SESSION_RE = re.compile(r"Session (\d+)")
 
+# TG (Telangana) regex patterns
+TG_DATE_RE = re.compile(r"(\d{2})-(\d{2})-(\d{4})")
+TG_TERM_RE = re.compile(r"([A-Za-z]+) Telangana Legislative Assembly \((\d{4})-(\d{4})\)")
+
 
 class LegislatureMetadata(TypedDict):
     state_code: str
@@ -53,7 +57,7 @@ class LegislatureMetadata(TypedDict):
     participants_kn: str | None
 
 
-STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB"]
+STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB", "TG"]
 
 BASE_FIELDS = [
     {"name": "state_code", "type": "string"},
@@ -75,6 +79,7 @@ STATE_LOCALES = {
     "TS": "te",
     "UP": "hi",
     "WB": "bn",
+    "TG": "te",
 }
 
 METADATA_SCHEMA = {
@@ -134,6 +139,24 @@ METADATA_SCHEMA["KL"].extend(
 
 # RJ (Rajasthan) uses the common session and term_number fields
 # No additional state-specific fields needed
+
+# Add state-specific fields for TG (Telangana)
+METADATA_SCHEMA["TG"].extend(
+    [
+        {"name": "house", "type": "string", "facet": True},
+        {"name": "session", "type": "int32", "facet": True},
+        {"name": "sitting_number", "type": "int32"},
+        {"name": "sitting_start_year", "type": "int32"},
+        {"name": "sitting_start_month", "type": "int32"},
+        {"name": "sitting_start_day", "type": "int32"},
+        {"name": "sitting_end_year", "type": "int32"},
+        {"name": "sitting_end_month", "type": "int32"},
+        {"name": "sitting_end_day", "type": "int32"},
+        {"name": "term_number", "type": "int32", "facet": True},
+        {"name": "term_start", "type": "int32"},
+        {"name": "term_end", "type": "int32"},
+    ]
+)
 
 
 def word_to_num(word: str) -> int:
@@ -439,6 +462,85 @@ def normalize_metadata_rj(metadata: dict) -> LegislatureMetadata:
     }
 
 
+def normalize_metadata_tg(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for TG (Telangana)
+    
+    # Date extraction from title (format: Assembly (DD-MM-YYYY))
+    title = metadata.get("title", "")
+    date_match = TG_DATE_RE.search(title)
+    if date_match:
+        day, month, year = map(int, date_match.groups())
+    else:
+        day, month, year = 0, 0, 0
+    
+    # House extraction
+    house = metadata.get("telangana_legislature_house", "Assembly")
+    
+    # Session extraction
+    session_str = metadata.get("telangana_legislature_session", "")
+    # Example: "Session 3" -> extract number
+    session_match = re.search(r"Session\s+(\d+)", session_str)
+    session = int(session_match.group(1)) if session_match else 0
+    
+    # Sitting extraction
+    sitting_str = metadata.get("telangana_legislature_sitting", "")
+    # Example: "sitting 1(23-07-2024 to 02-08-2024)"
+    sitting_match = re.search(r"sitting\s+(\d+)\((\d{2})-(\d{2})-(\d{4}) to (\d{2})-(\d{2})-(\d{4})\)", sitting_str)
+    if sitting_match:
+        sitting_number = int(sitting_match.group(1))
+        s_start_d, s_start_m, s_start_y = map(int, sitting_match.group(2, 3, 4))
+        s_end_d, s_end_m, s_end_y = map(int, sitting_match.group(5, 6, 7))
+    else:
+        sitting_number = 0
+        s_start_d, s_start_m, s_start_y = 0, 0, 0
+        s_end_d, s_end_m, s_end_y = 0, 0, 0
+    
+    # Term extraction
+    term_str = metadata.get("telangana_legislature_term", "")
+    # Example: "Third Telangana Legislative Assembly (2023-2028)"
+    term_match = TG_TERM_RE.search(term_str)
+    if term_match:
+        term_word = term_match.group(1)
+        term_number = word_to_num(term_word)
+        term_start = int(term_match.group(2))
+        term_end = int(term_match.group(3))
+    else:
+        term_number, term_start, term_end = 0, 0, 0
+    
+    return {
+        "state_code": "TG",
+        "languages": metadata.get("language", []),
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": metadata.get("title", ""),
+        "house": house,
+        "session": session,
+        "sitting_number": sitting_number,
+        "sitting_start_year": s_start_y,
+        "sitting_start_month": s_start_m,
+        "sitting_start_day": s_start_d,
+        "sitting_end_year": s_end_y,
+        "sitting_end_month": s_end_m,
+        "sitting_end_day": s_end_d,
+        "term_number": term_number,
+        "term_start": term_start,
+        "term_end": term_end,
+        "archive_link": metadata.get("identifier-access", "") or metadata.get("source", ""),
+        "section_type": None,
+        "start_page": None,
+        "end_page": None,
+        "book_id": None,
+        "place_session": None,
+        "minister_en": None,
+        "minister_kn": None,
+        "questioner_en": None,
+        "questioner_kn": None,
+        "participants_en": None,
+        "participants_kn": None,
+    }
+
+
 def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
     """
     Normalise the metadata, since each state has its own format
@@ -454,5 +556,7 @@ def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_kl(metadata)
         case "RJ":
             return normalize_metadata_rj(metadata)
+        case "TG":
+            return normalize_metadata_tg(metadata)
         case _:
             raise NotImplementedError()
