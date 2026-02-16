@@ -12,6 +12,9 @@ AP_TERM_RE = re.compile(r"([A-Za-z]+) Andhra Pradesh Assembly \((\d{4})-(\d{4})\
 KA_TERM_RE = re.compile(r"(\d+)\[(\d{4})-(\d{4})\]")
 KA_SESSION_RE = re.compile(r"(\d+)\[\d{4}\]")
 
+RJ_ASSEMBLY_RE = re.compile(r"Assembly (\d+)")
+RJ_SESSION_RE = re.compile(r"Session (\d+)")
+
 
 class LegislatureMetadata(TypedDict):
     state_code: str
@@ -128,6 +131,9 @@ METADATA_SCHEMA["KL"].extend(
         {"name": "subject", "type": "string"},
     ]
 )
+
+# RJ (Rajasthan) uses the common session and term_number fields
+# No additional state-specific fields needed
 
 
 def word_to_num(word: str) -> int:
@@ -369,6 +375,70 @@ def normalize_metadata_kl(metadata: dict) -> LegislatureMetadata:
     }
 
 
+def normalize_metadata_rj(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for RJ (Rajasthan)
+    
+    # Date extraction (date field is in DD/MM/YYYY format)
+    date_str = metadata.get("date", "00/00/0000")
+    try:
+        day, month, year = map(int, date_str.split("/"))
+    except (ValueError, AttributeError):
+        day, month, year = 0, 0, 0
+    
+    # Assembly number extraction from metadata field
+    # RJ uses assembly_number which maps to term_number in the common schema
+    term_number = int(metadata.get("rajasthan_legislature_assembly_number", 0))
+    
+    # Session number extraction from metadata field
+    session = int(metadata.get("rajasthan_legislature_session_number", 0))
+    
+    # Fallback: try to parse from title if metadata fields are missing
+    if term_number == 0 or session == 0:
+        title = metadata.get("title", "")
+        # Example: "Assembly 1, Session 1, 01/04/1952"
+        assembly_match = RJ_ASSEMBLY_RE.search(title)
+        session_match = RJ_SESSION_RE.search(title)
+        
+        if assembly_match:
+            term_number = int(assembly_match.group(1))
+        if session_match:
+            session = int(session_match.group(1))
+    
+    return {
+        "state_code": "RJ",
+        "languages": metadata.get("language", []),
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": metadata.get("title", ""),
+        # Reuse existing fields for consistency with other states
+        "house": "Legislative Assembly",
+        "session": session,
+        "sitting_number": None,
+        "sitting_start_year": None,
+        "sitting_start_month": None,
+        "sitting_start_day": None,
+        "sitting_end_year": None,
+        "sitting_end_month": None,
+        "sitting_end_day": None,
+        "term_number": term_number,
+        "term_start": None,
+        "term_end": None,
+        "archive_link": metadata.get("identifier-access", "") or metadata.get("source", ""),
+        "section_type": None,
+        "start_page": None,
+        "end_page": None,
+        "book_id": None,
+        "place_session": None,
+        "minister_en": None,
+        "minister_kn": None,
+        "questioner_en": None,
+        "questioner_kn": None,
+        "participants_en": None,
+        "participants_kn": None,
+    }
+
+
 def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
     """
     Normalise the metadata, since each state has its own format
@@ -382,5 +452,7 @@ def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_ka(metadata)
         case "KL":
             return normalize_metadata_kl(metadata)
+        case "RJ":
+            return normalize_metadata_rj(metadata)
         case _:
             raise NotImplementedError()
