@@ -53,7 +53,7 @@ class LegislatureMetadata(TypedDict):
 STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB"]
 
 BASE_FIELDS = [
-    {"name": "state_code", "type": "string", "facet": True},
+    {"name": "state_code", "type": "string"},
     {"name": "file_name", "type": "string"},
     {"name": "year", "type": "int32", "facet": True},
     {"name": "month", "type": "int32", "facet": True},
@@ -292,8 +292,7 @@ def normalize_metadata_ka(metadata: dict) -> LegislatureMetadata:
         "term_number": term_number,
         "term_start": term_start,
         "term_end": term_end,
-        "archive_link": metadata.get("identifier-access", "")
-        or metadata.get("source", ""),
+        "archive_link": metadata.get("identifier-access", ""),
         "section_type": metadata.get("kla_sectiontype"),
         "start_page": int(metadata.get("kla_startpage", 0)),
         "end_page": int(metadata.get("kla_endpage", 0)),
