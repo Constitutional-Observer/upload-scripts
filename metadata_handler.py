@@ -19,6 +19,10 @@ RJ_SESSION_RE = re.compile(r"Session (\d+)")
 TG_DATE_RE = re.compile(r"(\d{2})-(\d{2})-(\d{4})")
 TG_TERM_RE = re.compile(r"([A-Za-z]+) Telangana Legislative Assembly \((\d{4})-(\d{4})\)")
 
+# TN (Tamil Nadu) regex patterns
+TN_ASSEMBLY_RE = re.compile(r"TNLA-(\d+)-\((\d{4})-(\d{4})\)")
+TN_SESSION_RE = re.compile(r"(\d+)\.(\d+)")
+
 
 class LegislatureMetadata(TypedDict):
     state_code: str
@@ -157,6 +161,8 @@ METADATA_SCHEMA["TG"].extend(
         {"name": "term_end", "type": "int32"},
     ]
 )
+
+# TN (Tamil Nadu) uses common fields, no additional state-specific fields needed
 
 
 def word_to_num(word: str) -> int:
@@ -541,6 +547,70 @@ def normalize_metadata_tg(metadata: dict) -> LegislatureMetadata:
     }
 
 
+def normalize_metadata_tn(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for TN (Tamil Nadu)
+    
+    # Date extraction from tnla_date field (format: DD-MM-YYYY)
+    date_str = metadata.get("tnla_date", "00-00-0000")
+    try:
+        day, month, year = map(int, date_str.split("-"))
+    except (ValueError, AttributeError):
+        day, month, year = 0, 0, 0
+    
+    # Assembly/Term extraction from tnla_assembly_no
+    # Format: "TNLA-06-(1977-1980)"
+    assembly_str = metadata.get("tnla_assembly_no", "")
+    assembly_match = TN_ASSEMBLY_RE.search(assembly_str)
+    if assembly_match:
+        term_number = int(assembly_match.group(1))
+        term_start = int(assembly_match.group(2))
+        term_end = int(assembly_match.group(3))
+    else:
+        term_number, term_start, term_end = 0, 0, 0
+    
+    # Session extraction from tnla_session_no
+    # Format: "2.0" (session.sub-session)
+    session_str = metadata.get("tnla_session_no", "0.0")
+    session_match = TN_SESSION_RE.search(session_str)
+    if session_match:
+        session = int(session_match.group(1))
+    else:
+        session = 0
+    
+    return {
+        "state_code": "TN",
+        "languages": metadata.get("language", []),
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": metadata.get("tnla_subject", "") or metadata.get("title", ""),
+        "house": "Legislative Assembly",
+        "session": session,
+        "sitting_number": None,
+        "sitting_start_year": None,
+        "sitting_start_month": None,
+        "sitting_start_day": None,
+        "sitting_end_year": None,
+        "sitting_end_month": None,
+        "sitting_end_day": None,
+        "term_number": term_number,
+        "term_start": term_start,
+        "term_end": term_end,
+        "archive_link": metadata.get("identifier-access", "") or metadata.get("source", ""),
+        "section_type": metadata.get("tnla_business", ""),
+        "start_page": None,
+        "end_page": None,
+        "book_id": None,
+        "place_session": None,
+        "minister_en": None,
+        "minister_kn": None,
+        "questioner_en": None,
+        "questioner_kn": None,
+        "participants_en": None,
+        "participants_kn": None,
+    }
+
+
 def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
     """
     Normalise the metadata, since each state has its own format
@@ -558,5 +628,7 @@ def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_rj(metadata)
         case "TG":
             return normalize_metadata_tg(metadata)
+        case "TN":
+            return normalize_metadata_tn(metadata)
         case _:
             raise NotImplementedError()
