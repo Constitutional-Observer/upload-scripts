@@ -690,6 +690,138 @@ def normalize_metadata_up(metadata: dict) -> LegislatureMetadata:
     }
 
 
+def normalize_metadata_wb(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for WB (West Bengal)
+    
+    # Date extraction from westbengal_legislature_proceeding_year
+    # This field contains the year of the proceedings
+    year_str = metadata.get("westbengal_legislature_proceeding_year", "0000")
+    try:
+        year = int(year_str)
+    except ValueError:
+        year = 0
+    
+    # For month and day, we'll use 0 as defaults since the metadata doesn't provide specific dates
+    # The westbengal_legislature_dates field contains multiple dates, but we'll use the year from above
+    month, day = 0, 0
+    
+    # Extract term number from westbengal_legislature_document_id
+    # This appears to be a document ID, but we'll map it to term_number for consistency
+    term_number = int(metadata.get("westbengal_legislature_document_id", 0))
+    
+    # Extract session from westbengal_legislature_document_type_id
+    # This appears to be a document type ID, but we'll map it to session for consistency
+    session = int(metadata.get("westbengal_legislature_document_type_id", 0))
+    
+    # House extraction
+    house = metadata.get("westbengal_legislature_house", "Assembly")
+    
+    # Extract title
+    title_en = metadata.get("westbengal_legislature_title", "") or metadata.get("title", "")
+    
+    # Parse legislature period for term years
+    # Format: "28.11.1940 to 04.12.1940"
+    period_str = metadata.get("westbengal_legislature_period", "")
+    if period_str:
+        # Try to extract years from the period string
+        period_parts = period_str.split(" to ")
+        if len(period_parts) == 2:
+            try:
+                # Extract year from first date (DD.MM.YYYY)
+                first_date_parts = period_parts[0].strip().split(".")
+                if len(first_date_parts) == 3:
+                    term_start = int(first_date_parts[2])
+                else:
+                    term_start = year if year != 0 else 0
+                
+                # Extract year from second date (DD.MM.YYYY)
+                second_date_parts = period_parts[1].strip().split(".")
+                if len(second_date_parts) == 3:
+                    term_end = int(second_date_parts[2])
+                else:
+                    term_end = year if year != 0 else 0
+            except (ValueError, IndexError):
+                term_start = year if year != 0 else 0
+                term_end = year if year != 0 else 0
+        else:
+            term_start = year if year != 0 else 0
+            term_end = year if year != 0 else 0
+    else:
+        term_start = year if year != 0 else 0
+        term_end = year if year != 0 else 0
+    
+    # Parse sitting dates from westbengal_legislature_dates
+    # Format: "28.11.1940, 29.11.1940, 30.11.1940, 02.12.1940, 03.12.1940 & 04.12.1940."
+    dates_str = metadata.get("westbengal_legislature_dates", "")
+    if dates_str:
+        # Try to extract the first and last dates
+        # Clean up the string by replacing commas and & with spaces
+        cleaned_dates = dates_str.replace(",", "").replace("&", "").replace(".", "")
+        date_parts = cleaned_dates.split()
+        
+        # Look for the first valid date (DD MM YYYY format)
+        sitting_start_day, sitting_start_month, sitting_start_year = 0, 0, 0
+        sitting_end_day, sitting_end_month, sitting_end_year = 0, 0, 0
+        
+        # Find all date components in the string
+        date_components = []
+        i = 0
+        while i < len(date_parts):
+            part = date_parts[i]
+            # Check if it's a 2-digit number (could be day or month)
+            if part.isdigit() and len(part) == 2:
+                # Look ahead for month and year
+                if i + 2 < len(date_parts):
+                    next_part1 = date_parts[i + 1]
+                    next_part2 = date_parts[i + 2]
+                    if next_part1.isdigit() and len(next_part1) == 2 and next_part2.isdigit() and len(next_part2) == 4:
+                        date_components.append((int(part), int(next_part1), int(next_part2)))
+                        i += 3
+                        continue
+            i += 1
+        
+        # If we found date components, use the first and last
+        if date_components:
+            sitting_start_day, sitting_start_month, sitting_start_year = date_components[0]
+            sitting_end_day, sitting_end_month, sitting_end_year = date_components[-1]
+    else:
+        sitting_start_day, sitting_start_month, sitting_start_year = 0, 0, 0
+        sitting_end_day, sitting_end_month, sitting_end_year = 0, 0, 0
+    
+    return {
+        "state_code": "WB",
+        "languages": metadata.get("language", []),
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": title_en,
+        "house": house,
+        "session": session,
+        "sitting_number": None,
+        "sitting_start_year": sitting_start_year,
+        "sitting_start_month": sitting_start_month,
+        "sitting_start_day": sitting_start_day,
+        "sitting_end_year": sitting_end_year,
+        "sitting_end_month": sitting_end_month,
+        "sitting_end_day": sitting_end_day,
+        "term_number": term_number,
+        "term_start": term_start,
+        "term_end": term_end,
+        "archive_link": metadata.get("identifier-access", "") or metadata.get("source", ""),
+        "section_type": None,
+        "start_page": None,
+        "end_page": None,
+        "book_id": None,
+        "place_session": None,
+        "minister_en": None,
+        "minister_kn": None,
+        "questioner_en": None,
+        "questioner_kn": None,
+        "participants_en": None,
+        "participants_kn": None,
+    }
+
+
 def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
     """
     Normalise the metadata, since each state has its own format
@@ -711,5 +843,7 @@ def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_tn(metadata)
         case "UP":
             return normalize_metadata_up(metadata)
+        case "WB":
+            return normalize_metadata_wb(metadata)
         case _:
             raise NotImplementedError()
