@@ -23,6 +23,8 @@ TG_TERM_RE = re.compile(r"([A-Za-z]+) Telangana Legislative Assembly \((\d{4})-(
 TN_ASSEMBLY_RE = re.compile(r"TNLA-(\d+)-\((\d{4})-(\d{4})\)")
 TN_SESSION_RE = re.compile(r"(\d+)\.(\d+)")
 
+# UP (Uttar Pradesh) regex patterns - not needed as fields are already numeric
+
 
 class LegislatureMetadata(TypedDict):
     state_code: str
@@ -453,7 +455,7 @@ def normalize_metadata_rj(metadata: dict) -> LegislatureMetadata:
         "term_number": term_number,
         "term_start": None,
         "term_end": None,
-        "archive_link": metadata.get("identifier-access", "") or metadata.get("source", ""),
+        "archive_link": metadata.get("identifier-access", ""),
         "section_type": None,
         "start_page": None,
         "end_page": None,
@@ -532,7 +534,7 @@ def normalize_metadata_tg(metadata: dict) -> LegislatureMetadata:
         "term_number": term_number,
         "term_start": term_start,
         "term_end": term_end,
-        "archive_link": metadata.get("identifier-access", "") or metadata.get("source", ""),
+        "archive_link": metadata.get("identifier-access", ""),
         "section_type": None,
         "start_page": None,
         "end_page": None,
@@ -596,8 +598,85 @@ def normalize_metadata_tn(metadata: dict) -> LegislatureMetadata:
         "term_number": term_number,
         "term_start": term_start,
         "term_end": term_end,
-        "archive_link": metadata.get("identifier-access", "") or metadata.get("source", ""),
+        "archive_link": metadata["identifier-access"],
         "section_type": metadata.get("tnla_business", ""),
+        "start_page": None,
+        "end_page": None,
+        "book_id": None,
+        "place_session": None,
+        "minister_en": None,
+        "minister_kn": None,
+        "questioner_en": None,
+        "questioner_kn": None,
+        "participants_en": None,
+        "participants_kn": None,
+    }
+
+
+def normalize_metadata_up(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for UP (Uttar Pradesh)
+    
+    # Date extraction from date field (format: DD-MM-YYYY)
+    date_str = metadata.get("date", "00-00-0000")
+    try:
+        day, month, year = map(int, date_str.split("-"))
+    except (ValueError, AttributeError):
+        day, month, year = 0, 0, 0
+    
+    # Assembly/Term extraction from up_legislature_assembly_number
+    term_number = int(metadata.get("up_legislature_assembly_number", 0))
+    
+    # Session extraction from up_legislature_session_number
+    session = int(metadata.get("up_legislature_session_number", 0))
+    
+    # Fallback: try to parse from title if metadata fields are missing
+    if term_number == 0 or session == 0:
+        title = metadata.get("title", "")
+        # Example: "Assembly 1, Session 1, 02-09-1952"
+        # We can reuse RJ patterns since they have similar format
+        assembly_match = RJ_ASSEMBLY_RE.search(title)
+        session_match = RJ_SESSION_RE.search(title)
+        
+        if assembly_match:
+            term_number = int(assembly_match.group(1))
+        if session_match:
+            session = int(session_match.group(1))
+    
+    # Get term years from session_year field if available
+    session_year_str = metadata.get("up_legislature_session_year", "")
+    if session_year_str:
+        try:
+            session_year = int(session_year_str)
+            # For UP, we'll assume the term is the same year (simplification)
+            # In reality, this might need more complex logic
+            term_start = session_year
+            term_end = session_year
+        except ValueError:
+            term_start, term_end = 0, 0
+    else:
+        term_start, term_end = 0, 0
+    
+    return {
+        "state_code": "UP",
+        "languages": metadata.get("language", []),
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": metadata.get("title", ""),
+        "house": "Legislative Assembly",
+        "session": session,
+        "sitting_number": None,
+        "sitting_start_year": None,
+        "sitting_start_month": None,
+        "sitting_start_day": None,
+        "sitting_end_year": None,
+        "sitting_end_month": None,
+        "sitting_end_day": None,
+        "term_number": term_number,
+        "term_start": term_start,
+        "term_end": term_end,
+        "archive_link": metadata["identifier-access"],
+        "section_type": None,
         "start_page": None,
         "end_page": None,
         "book_id": None,
@@ -630,5 +709,7 @@ def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_tg(metadata)
         case "TN":
             return normalize_metadata_tn(metadata)
+        case "UP":
+            return normalize_metadata_up(metadata)
         case _:
             raise NotImplementedError()
