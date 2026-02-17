@@ -4,6 +4,7 @@ import argparse
 import json
 import traceback
 from pathlib import Path
+from itertools import batched
 
 import meilisearch
 from tqdm import tqdm
@@ -13,7 +14,7 @@ from metadata_handler import normalize_metadata
 
 def chunk_file(file_text: str) -> list[str]:
     """Split file text into chunks by double newlines"""
-    return list(file_text.split("\n\n"))
+    return list(file_text.split("\n"))
 
 
 def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
@@ -119,7 +120,7 @@ def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
         documents = []
         for chunk_id, chunk in enumerate(file_chunks):
             document = {
-                "id": f"{state_code}_{file_name}_{chunk_id}",
+                "id": f"{state_code}_{file_name.replace('.', '_')}_{chunk_id}",
                 "state_code": state_code,
                 "file_name": file_name,
                 "chunk_id": chunk_id,
@@ -132,17 +133,16 @@ def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
         if documents:
             try:
                 # Use larger batch size for better performance
-                batch_size = 5000  # Increased from 1000
+                batch_size = 1000  # Increased from 1000
                 task_ids = []
 
-                for i in range(0, len(documents), batch_size):
-                    batch = documents[i : i + batch_size]
+                for i, batch in enumerate(batched(documents, batch_size)):
                     task = collection.add_documents(batch)
                     task_ids.append(task.task_uid)
                     responses.append(
                         {
                             "success": True,
-                            "batch": i // batch_size + 1,
+                            "batch": i,
                             "count": len(batch),
                             "task_id": task.task_uid,
                         }
