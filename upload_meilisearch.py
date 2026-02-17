@@ -14,7 +14,7 @@ from metadata_handler import normalize_metadata
 
 def chunk_file(file_text: str) -> list[str]:
     """Split file text into chunks by double newlines"""
-    return list(file_text.split("\n"))
+    return list(file_text.split("\n\n"))
 
 
 def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
@@ -83,6 +83,7 @@ def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
         collection.update_searchable_attributes(searchable_attributes)
         collection.update_filterable_attributes(filterable_attributes)
         collection.update_sortable_attributes(sortable_attributes)
+        collection.update_distinct_attribute('file_name')
 
     # Process and upload documents
     for item in tqdm(metadata, desc=f"Processing {state_code} documents"):
@@ -137,7 +138,7 @@ def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
                 task_ids = []
 
                 for i, batch in enumerate(batched(documents, batch_size)):
-                    task = collection.add_documents(batch)
+                    task = collection.add_documents(batch, primary_key="id")
                     task_ids.append(task.task_uid)
                     responses.append(
                         {
