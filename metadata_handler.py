@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import TypedDict, NotRequired
 import re
 
 
@@ -39,30 +39,31 @@ class LegislatureMetadata(TypedDict):
     archive_link: str
 
     # AP Specific
-    house: str | None
-    session: int | None
-    sitting_number: int | None
-    sitting_start_year: int | None
-    sitting_start_month: int | None
-    sitting_start_day: int | None
-    sitting_end_year: int | None
-    sitting_end_month: int | None
-    sitting_end_day: int | None
-    term_number: int | None
-    term_start: int | None
-    term_end: int | None
+    house: NotRequired[str]
+    session: NotRequired[int]
+    sitting_number: NotRequired[int]
+    sitting_start_year: NotRequired[int]
+    sitting_start_month: NotRequired[int]
+    sitting_start_day: NotRequired[int]
+    sitting_end_year: NotRequired[int]
+    sitting_end_month: NotRequired[int]
+    sitting_end_day: NotRequired[int]
+    term_number: NotRequired[int]
+    term_start: NotRequired[int]
+    term_end: NotRequired[int]
 
-    section_type: str | None
-    start_page: int | None
-    end_page: int | None
-    book_id: int | None
-    place_session: str | None
-    minister_en: str | None
-    minister_kn: str | None
-    questioner_en: str | None
-    questioner_kn: str | None
-    participants_en: str | None
-    participants_kn: str | None
+    section_type: NotRequired[str]
+    start_page: NotRequired[int]
+    end_page: NotRequired[int]
+    book_id: NotRequired[int]
+    place_session: NotRequired[str]
+    minister_en: NotRequired[str]
+    minister_kn: NotRequired[str]
+    questioner_en: NotRequired[str]
+    questioner_kn: NotRequired[str]
+    participants_en: NotRequired[str]
+    participants_kn: NotRequired[str]
+    discussions: NotRequired[str]
 
 
 STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB", "TG"]
@@ -268,30 +269,7 @@ def normalize_metadata_as(metadata: dict) -> LegislatureMetadata:
         "month": month,
         "day": day,
         "title_en": "",
-        "house": None,
-        "session": None,
-        "sitting_number": None,
-        "sitting_start_year": None,
-        "sitting_start_month": None,
-        "sitting_start_day": None,
-        "sitting_end_year": None,
-        "sitting_end_month": None,
-        "sitting_end_day": None,
-        "term_number": None,
-        "term_start": None,
-        "term_end": None,
         "archive_link": metadata["identifier-access"],
-        "section_type": None,
-        "start_page": None,
-        "end_page": None,
-        "book_id": None,
-        "place_session": None,
-        "minister_en": None,
-        "minister_kn": None,
-        "questioner_en": None,
-        "questioner_kn": None,
-        "participants_en": None,
-        "participants_kn": None,
     }
 
 
@@ -318,40 +296,33 @@ def normalize_metadata_ka(metadata: dict) -> LegislatureMetadata:
     session_match = KA_SESSION_RE.search(metadata.get("kla_sessionnumber", ""))
     session = int(session_match.group(1)) if session_match else 0
 
-    return {
-        "state_code": "KA",
-        "languages": metadata.get("language", []),
-        "year": year,
-        "month": month,
-        "day": day,
-        "title_en": metadata.get("kla_debate_title_subject_eng", ""),
+    return LegislatureMetadata(
+        state_code= "KA",
+        languages= metadata.get("language", []),
+        year= year,
+        month= month,
+        day= day,
+        title_en= metadata.get("kla_debate_title_subject_eng", ""),
         # Extra fields for KA
-        "discussions": metadata.get("kla_debate_title_subject_kan", ""),
-        "house": "Legislative Assembly",
-        "session": session,
-        "sitting_number": None,
-        "sitting_start_year": None,
-        "sitting_start_month": None,
-        "sitting_start_day": None,
-        "sitting_end_year": None,
-        "sitting_end_month": None,
-        "sitting_end_day": None,
-        "term_number": term_number,
-        "term_start": term_start,
-        "term_end": term_end,
-        "archive_link": metadata["identifier-access"],
-        "section_type": metadata.get("kla_sectiontype"),
-        "start_page": int(metadata.get("kla_startpage", 0)),
-        "end_page": int(metadata.get("kla_endpage", 0)),
-        "book_id": int(metadata.get("kla_bookid", 0)),
-        "place_session": metadata.get("kla_placesession"),
-        "minister_en": metadata.get("kla_minister_name_eng"),
-        "minister_kn": metadata.get("kla_minister_name_kan"),
-        "questioner_en": metadata.get("kla_questioner_name_eng"),
-        "questioner_kn": metadata.get("kla_questioner_name_kan"),
-        "participants_en": metadata.get("kla_debate_participants_eng"),
-        "participants_kn": metadata.get("kla_debate_participants_kan"),
-    }
+        discussions= metadata.get("kla_debate_title_subject_kan", ""),
+        house= "Legislative Assembly",
+        session= session,
+        term_number= term_number,
+        term_start= term_start,
+        term_end= term_end,
+        archive_link= metadata["identifier-access"],
+        section_type= metadata.get("kla_sectiontype"),
+        start_page= int(metadata.get("kla_startpage", 0)),
+        end_page= int(metadata.get("kla_endpage", 0)),
+        book_id= int(metadata.get("kla_bookid", 0)),
+        place_session= metadata.get("kla_placesession"),
+        minister_en= metadata.get("kla_minister_name_eng"),
+        minister_kn= metadata.get("kla_minister_name_kan"),
+        questioner_en= metadata.get("kla_questioner_name_eng"),
+        questioner_kn= metadata.get("kla_questioner_name_kan"),
+        participants_en= metadata.get("kla_debate_participants_eng"),
+        participants_kn= metadata.get("kla_debate_participants_kan"),
+    )
 
 
 def normalize_metadata_kl(metadata: dict) -> LegislatureMetadata:
@@ -371,42 +342,18 @@ def normalize_metadata_kl(metadata: dict) -> LegislatureMetadata:
         ", ".join(subject_list) if isinstance(subject_list, list) else str(subject_list)
     )
 
-    return {
-        "state_code": "KL",
-        "languages": metadata.get("languages", []),
-        "year": year,
-        "month": month,
-        "day": day,
-        "title_en": metadata.get("title", ""),
+    return LegislatureMetadata(
+        state_code= "KL",
+        languages= metadata.get("languages", []),
+        year= year,
+        month= month,
+        day= day,
+        title_en=metadata.get("title", ""),
         # KL-specific fields
-        "discussions": metadata.get("description", ""),
-        "subject": subjects,
-        # Most other fields are not available in KL metadata
-        "house": None,
-        "session": None,
-        "sitting_number": None,
-        "sitting_start_year": None,
-        "sitting_start_month": None,
-        "sitting_start_day": None,
-        "sitting_end_year": None,
-        "sitting_end_month": None,
-        "sitting_end_day": None,
-        "term_number": None,
-        "term_start": None,
-        "term_end": None,
-        "archive_link": metadata["identifier-access"],
-        "section_type": None,
-        "start_page": None,
-        "end_page": None,
-        "book_id": None,
-        "place_session": None,
-        "minister_en": None,
-        "minister_kn": None,
-        "questioner_en": None,
-        "questioner_kn": None,
-        "participants_en": None,
-        "participants_kn": None,
-    }
+        discussions= metadata.get("description", ""),
+        subject= subjects,
+        archive_link= metadata["identifier-access"],
+    )
 
 
 def normalize_metadata_rj(metadata: dict) -> LegislatureMetadata:
@@ -448,28 +395,8 @@ def normalize_metadata_rj(metadata: dict) -> LegislatureMetadata:
         # Reuse existing fields for consistency with other states
         "house": "Legislative Assembly",
         "session": session,
-        "sitting_number": None,
-        "sitting_start_year": None,
-        "sitting_start_month": None,
-        "sitting_start_day": None,
-        "sitting_end_year": None,
-        "sitting_end_month": None,
-        "sitting_end_day": None,
         "term_number": term_number,
-        "term_start": None,
-        "term_end": None,
         "archive_link": metadata["identifier-access"],
-        "section_type": None,
-        "start_page": None,
-        "end_page": None,
-        "book_id": None,
-        "place_session": None,
-        "minister_en": None,
-        "minister_kn": None,
-        "questioner_en": None,
-        "questioner_kn": None,
-        "participants_en": None,
-        "participants_kn": None,
     }
 
 
@@ -541,17 +468,6 @@ def normalize_metadata_tg(metadata: dict) -> LegislatureMetadata:
         "term_start": term_start,
         "term_end": term_end,
         "archive_link": metadata["identifier-access"],
-        "section_type": None,
-        "start_page": None,
-        "end_page": None,
-        "book_id": None,
-        "place_session": None,
-        "minister_en": None,
-        "minister_kn": None,
-        "questioner_en": None,
-        "questioner_kn": None,
-        "participants_en": None,
-        "participants_kn": None,
     }
 
 
@@ -594,28 +510,11 @@ def normalize_metadata_tn(metadata: dict) -> LegislatureMetadata:
         "title_en": metadata.get("tnla_subject", "") or metadata.get("title", ""),
         "house": "Legislative Assembly",
         "session": session,
-        "sitting_number": None,
-        "sitting_start_year": None,
-        "sitting_start_month": None,
-        "sitting_start_day": None,
-        "sitting_end_year": None,
-        "sitting_end_month": None,
-        "sitting_end_day": None,
         "term_number": term_number,
         "term_start": term_start,
         "term_end": term_end,
         "archive_link": metadata["identifier-access"],
         "section_type": metadata.get("tnla_business", ""),
-        "start_page": None,
-        "end_page": None,
-        "book_id": None,
-        "place_session": None,
-        "minister_en": None,
-        "minister_kn": None,
-        "questioner_en": None,
-        "questioner_kn": None,
-        "participants_en": None,
-        "participants_kn": None,
     }
 
 
@@ -671,28 +570,10 @@ def normalize_metadata_up(metadata: dict) -> LegislatureMetadata:
         "title_en": metadata.get("title", ""),
         "house": "Legislative Assembly",
         "session": session,
-        "sitting_number": None,
-        "sitting_start_year": None,
-        "sitting_start_month": None,
-        "sitting_start_day": None,
-        "sitting_end_year": None,
-        "sitting_end_month": None,
-        "sitting_end_day": None,
         "term_number": term_number,
         "term_start": term_start,
         "term_end": term_end,
         "archive_link": metadata["identifier-access"],
-        "section_type": None,
-        "start_page": None,
-        "end_page": None,
-        "book_id": None,
-        "place_session": None,
-        "minister_en": None,
-        "minister_kn": None,
-        "questioner_en": None,
-        "questioner_kn": None,
-        "participants_en": None,
-        "participants_kn": None,
     }
 
 
@@ -814,7 +695,6 @@ def normalize_metadata_wb(metadata: dict) -> LegislatureMetadata:
         "title_en": title_en,
         "house": house,
         "session": session,
-        "sitting_number": None,
         "sitting_start_year": sitting_start_year,
         "sitting_start_month": sitting_start_month,
         "sitting_start_day": sitting_start_day,
@@ -825,17 +705,6 @@ def normalize_metadata_wb(metadata: dict) -> LegislatureMetadata:
         "term_start": term_start,
         "term_end": term_end,
         "archive_link": metadata["identifier-access"],
-        "section_type": None,
-        "start_page": None,
-        "end_page": None,
-        "book_id": None,
-        "place_session": None,
-        "minister_en": None,
-        "minister_kn": None,
-        "questioner_en": None,
-        "questioner_kn": None,
-        "participants_en": None,
-        "participants_kn": None,
     }
 
 
