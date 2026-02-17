@@ -540,7 +540,7 @@ def normalize_metadata_tg(metadata: dict) -> LegislatureMetadata:
         "term_number": term_number,
         "term_start": term_start,
         "term_end": term_end,
-        "archive_link": metadata[identifier-access"],
+        "archive_link": metadata["identifier-access"],
         "section_type": None,
         "start_page": None,
         "end_page": None,
