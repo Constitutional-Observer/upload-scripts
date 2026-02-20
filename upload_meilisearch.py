@@ -14,7 +14,45 @@ from metadata_handler import normalize_metadata
 
 def chunk_file(file_text: str) -> list[str]:
     """Split file text into chunks by double newlines"""
-    return list(file_text.split("\n\n"))
+    import re
+    
+    MAX_CHUNK_LEN = 200 # 200 words
+    current_chunk = ""
+    current_chunk_word_count = 0
+    
+    # Split on double newlines, preserving empty paragraphs for now
+    raw_split_file = re.split(r'\n\n', file_text)
+    chunks = []
+
+    for raw_split in raw_split_file:
+        # Skip completely empty paragraphs (only whitespace)
+        if not raw_split.strip():
+            continue
+            
+        # Count words using regex that handles all Unicode whitespace
+        # This includes regular spaces, non-breaking spaces, tabs, etc.
+        words = re.split(r'\s+', raw_split.strip())
+        raw_split_word_count = len(words)
+        
+        if raw_split_word_count + current_chunk_word_count > MAX_CHUNK_LEN:
+            # Start new chunk if current one would exceed limit
+            if current_chunk:  # Only add if we have content
+                chunks.append(current_chunk)
+            current_chunk = raw_split
+            current_chunk_word_count = raw_split_word_count
+        else:
+            # Add to current chunk
+            if current_chunk:
+                current_chunk += "\n\n" + raw_split
+            else:
+                current_chunk = raw_split
+            current_chunk_word_count += raw_split_word_count
+
+    # Add final chunk if it has content
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
 
 
 def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
