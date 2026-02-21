@@ -163,7 +163,7 @@ def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
                 "state_code": state_code,
                 "file_name": file_name,
                 "chunk_id": chunk_id,
-                "discussions": chunk,
+                "__discussions": chunk,
                 **metadata_dict,
             }
             documents.append(document)
