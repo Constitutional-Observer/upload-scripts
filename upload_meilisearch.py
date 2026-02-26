@@ -4,7 +4,7 @@ import argparse
 import json
 import traceback
 from pathlib import Path
-from itertools import batched
+from more_itertools import batched
 
 import meilisearch
 from tqdm import tqdm
