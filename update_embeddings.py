@@ -3,23 +3,27 @@
 Script to read documents from Meilisearch in chunks, apply embeddings, and update them.
 """
 
-import argparse
 import os
-from typing import List, Dict, Any
+import argparse
 
+import httpx
 from meilisearch import Client
-from sentence_transformers import SentenceTransformer
-from more_itertools import batched
+
+LLAMA_CPP_URL = os.environ["LLAMA_CPP_URL"]
 
 
-def process_documents_in_batches(client: Client, index_name: str, model_name: str, batch_size: int = 50) -> None:
+def process_documents_in_batches(client: Client, index_name: str, batch_size: int = 50) -> None:
     """Process documents in batches: fetch, embed, update."""
     index = client.index(index_name)
-    model = SentenceTransformer(model_name)
 
     offset = 0
     batch_num = 1
-    
+
+    llama_client = httpx.Client()
+    index.update_embedders(
+        {"hf-provider": {"source": "userProvided", "dimensions": 768}}
+    )
+
     while True:
         # Fetch batch
         print(f"Fetching batch {batch_num} (offset: {offset})...")
@@ -30,20 +34,19 @@ def process_documents_in_batches(client: Client, index_name: str, model_name: st
             break
 
         documents = batch.results
-        print(documents[0].__dict__)
 
         # Generate embeddings
         print(f"Generating embeddings for {len(documents)} documents...")
-        texts = [doc.__dict__["__discussions"] for doc in documents]
-        embeddings = model.encode(texts, batch_size=1, show_progress_bar=True)
+        texts = ["document: " + doc.__dict__["__discussions"] for doc in documents]
+        embeddings = llama_client.post(url=f"{LLAMA_CPP_URL}/v1/embeddings", json={"input": texts}, timeout=10)
 
         # Add embeddings to documents
         for i, doc in enumerate(documents):
-            doc.embedding = embeddings[i].tolist()
+            doc.__dict__["_vectors"] = {"hf-provider": embeddings.json()["data"][i]}
 
         # Update documents
         print(f"Updating batch {batch_num}...")
-        index.update_documents(documents)
+        index.update_documents([d.__dict__ for d in documents])
         
         offset += batch_size
         batch_num += 1
@@ -53,7 +56,6 @@ def process_documents_in_batches(client: Client, index_name: str, model_name: st
 def main():
     parser = argparse.ArgumentParser(description="Update Meilisearch documents with embeddings.")
     parser.add_argument("--index", type=str, required=True, help="Meilisearch index name")
-    parser.add_argument("--model", type=str, default="all-MiniLM-L6-v2", help="Sentence Transformer model name")
     parser.add_argument("--meilisearch-url", type=str, default="http://localhost:7700", help="Meilisearch URL")
     parser.add_argument("--meilisearch-key", type=str, default=None, help="Meilisearch API key")
     parser.add_argument("--batch-size", type=int, default=50, help="Batch size for processing")
@@ -65,7 +67,7 @@ def main():
     
     # Process documents in batches
     print(f"Starting to process documents from index: {args.index}")
-    process_documents_in_batches(client, args.index, args.model, args.batch_size)
+    process_documents_in_batches(client, args.index, args.batch_size)
     
     print("All documents processed successfully!")
 
