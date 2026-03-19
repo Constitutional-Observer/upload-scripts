@@ -15,25 +15,25 @@ from metadata_handler import normalize_metadata
 def chunk_file(file_text: str) -> list[str]:
     """Split file text into chunks by double newlines"""
     import re
-    
-    MAX_CHUNK_LEN = 200 # 200 words
+
+    MAX_CHUNK_LEN = 200  # 200 words
     current_chunk = ""
     current_chunk_word_count = 0
-    
+
     # Split on double newlines, preserving empty paragraphs for now
-    raw_split_file = re.split(r'\n\n', file_text)
+    raw_split_file = re.split(r"\n\n", file_text)
     chunks = []
 
     for raw_split in raw_split_file:
         # Skip completely empty paragraphs (only whitespace)
         if not raw_split.strip():
             continue
-            
+
         # Count words using regex that handles all Unicode whitespace
         # This includes regular spaces, non-breaking spaces, tabs, etc.
-        words = re.split(r'\s+', raw_split.strip())
+        words = re.split(r"\s+", raw_split.strip())
         raw_split_word_count = len(words)
-        
+
         if raw_split_word_count + current_chunk_word_count > MAX_CHUNK_LEN:
             # Start new chunk if current one would exceed limit
             if current_chunk:  # Only add if we have content
@@ -55,8 +55,16 @@ def chunk_file(file_text: str) -> list[str]:
     return chunks
 
 
-def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
-    """Upload documents from a state directory to Meilisearch"""
+def upload_documents_from_path(
+    files_path: Path, meilisearch_config: dict, limit: int = None
+):
+    """Upload documents from a state directory to Meilisearch
+
+    Args:
+        files_path: Path to state directory containing data
+        meilisearch_config: Meilisearch configuration
+        limit: Optional limit on number of documents to process
+    """
     if not files_path.is_dir():
         print("Invalid path, expected a directory with files")
         return
@@ -104,7 +112,7 @@ def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
         from metadata_handler import METADATA_SCHEMA
 
         # Base searchable attributes
-        searchable_attributes = ["discussions", "title_en"]
+        searchable_attributes = ["__discussions", "title_en"]
         filterable_attributes = ["state_code", "year", "month", "day"]
         sortable_attributes = ["year", "month", "day"]
 
@@ -121,10 +129,11 @@ def upload_documents_from_path(files_path: Path, meilisearch_config: dict):
         collection.update_searchable_attributes(searchable_attributes)
         collection.update_filterable_attributes(filterable_attributes)
         collection.update_sortable_attributes(sortable_attributes)
-        collection.update_distinct_attribute('file_name')
+        collection.update_distinct_attribute("file_name")
 
     # Process and upload documents
-    for item in tqdm(metadata, desc=f"Processing {state_code} documents"):
+    metadata_to_process = metadata[:limit] if limit else metadata
+    for item in tqdm(metadata_to_process, desc=f"Processing {state_code} documents"):
         # Find the DJVU text file
         file_name = None
         for file in item.get("files", []):
@@ -220,6 +229,9 @@ def main():
         "--host", default="http://localhost:7700", help="Meilisearch host URL"
     )
     parser.add_argument("--api-key", help="Meilisearch API key (if required)")
+    parser.add_argument(
+        "--limit", type=int, help="Optional limit on number of documents to process"
+    )
 
     args = parser.parse_args()
 
@@ -232,7 +244,7 @@ def main():
         meilisearch_config["api_key"] = args.api_key
 
     path = Path(args.filename)
-    upload_documents_from_path(path, meilisearch_config)
+    upload_documents_from_path(path, meilisearch_config, args.limit)
 
 
 if __name__ == "__main__":
