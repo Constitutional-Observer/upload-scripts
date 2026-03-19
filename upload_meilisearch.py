@@ -56,7 +56,7 @@ def chunk_file(file_text: str) -> list[str]:
 
 
 def upload_documents_from_path(
-    files_path: Path, meilisearch_config: dict, limit: int = None
+    files_path: Path, meilisearch_config: dict, limit: int = None, prefix: str = "state_legislature_debates"
 ):
     """Upload documents from a state directory to Meilisearch
 
@@ -64,6 +64,7 @@ def upload_documents_from_path(
         files_path: Path to state directory containing data
         meilisearch_config: Meilisearch configuration
         limit: Optional limit on number of documents to process
+        prefix: Prefix for the index name
     """
     if not files_path.is_dir():
         print("Invalid path, expected a directory with files")
@@ -96,7 +97,7 @@ def upload_documents_from_path(
     metadata_errors = []
 
     # Collection name follows the same pattern as other upload scripts
-    collection_name = f"state_legislature_debates_{state_code.lower()}"
+    collection_name = f"{prefix}_{state_code.lower()}"
 
     # Create or get collection
     try:
@@ -232,6 +233,7 @@ def main():
     parser.add_argument(
         "--limit", type=int, help="Optional limit on number of documents to process"
     )
+    parser.add_argument("--prefix", default="state_legislature_debates", help="Prefix for the index name")
 
     args = parser.parse_args()
 
@@ -244,7 +246,7 @@ def main():
         meilisearch_config["api_key"] = args.api_key
 
     path = Path(args.filename)
-    upload_documents_from_path(path, meilisearch_config, args.limit)
+    upload_documents_from_path(path, meilisearch_config, args.limit, args.prefix)
 
 
 if __name__ == "__main__":
