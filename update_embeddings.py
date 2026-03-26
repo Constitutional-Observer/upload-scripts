@@ -9,8 +9,6 @@ import argparse
 import httpx
 from meilisearch import Client
 
-LLAMA_CPP_URL = os.environ["LLAMA_CPP_URL"]
-
 
 def process_documents_in_batches(
     client: Client, index_name: str, batch_size: int = 50
@@ -27,7 +25,7 @@ def process_documents_in_batches(
             "LLAMA_PROVIDER": {
                 "source": "rest",
                 "dimensions": 768,
-                "url": "http://llamacpp-server:8080/v1/embeddings",
+                "url": "http://100.87.243.70:9000/v1/embeddings",
                 "request": {
                     "model": "jinaai/jina-embeddings-v5-text-nano-retrieval",
                     "input": ["{{text}}", "{{..}}"],
