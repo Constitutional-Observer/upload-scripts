@@ -12,63 +12,94 @@ from meilisearch import Client
 LLAMA_CPP_URL = os.environ["LLAMA_CPP_URL"]
 
 
-def process_documents_in_batches(client: Client, index_name: str, batch_size: int = 50) -> None:
+def process_documents_in_batches(
+    client: Client, index_name: str, batch_size: int = 50
+) -> None:
     """Process documents in batches: fetch, embed, update."""
     index = client.index(index_name)
 
-    offset = 0
-    batch_num = 1
+    # offset = 0
+    # batch_num = 1
 
-    llama_client = httpx.Client()
-    index.update_embedders(
-        {"hf-provider": {"source": "userProvided", "dimensions": 768}}
+    # llama_client = httpx.Client()
+    result = index.update_embedders(
+        {
+            "LLAMA_PROVIDER": {
+                "source": "rest",
+                "dimensions": 768,
+                "url": "http://llamacpp-server:8080/v1/embeddings",
+                "request": {
+                    "model": "jinaai/jina-embeddings-v5-text-nano-retrieval",
+                    "input": ["{{text}}", "{{..}}"],
+                },
+                "response": {"data": [{"embedding": "{{embedding}}"}, "{{..}}"]},
+                "apiKey": "PROVIDER_API_KEY",
+                "documentTemplate": "Document: ",
+            }
+        }
     )
+    print(result.task_uid)
+    print(result)
 
-    while True:
-        # Fetch batch
-        print(f"Fetching batch {batch_num} (offset: {offset})...")
-        batch = index.get_documents({"offset": offset, "limit": batch_size})
+    # while True:
+    #     # Fetch batch
+    #     print(f"Fetching batch {batch_num} (offset: {offset})...")
+    #     batch = index.get_documents({"offset": offset, "limit": batch_size})
 
-        if not batch.results:
-            print("No more documents to process.")
-            break
+    #     if not batch.results:
+    #         print("No more documents to process.")
+    #         break
 
-        documents = batch.results
+    #     documents = batch.results
 
-        # Generate embeddings
-        print(f"Generating embeddings for {len(documents)} documents...")
-        texts = ["document: " + doc.__dict__["__discussions"] for doc in documents]
-        embeddings = llama_client.post(url=f"{LLAMA_CPP_URL}/v1/embeddings", json={"input": texts}, timeout=10)
+    #     # Generate embeddings
+    #     print(f"Generating embeddings for {len(documents)} documents...")
+    #     texts = ["Document: " + doc.__dict__["__discussions"] for doc in documents]
+    #     embeddings = llama_client.post(url=f"{LLAMA_CPP_URL}/v1/embeddings", json={"input": texts}, timeout=20)
 
-        # Add embeddings to documents
-        for i, doc in enumerate(documents):
-            doc.__dict__["_vectors"] = {"hf-provider": embeddings.json()["data"][i]}
+    #     # Add embeddings to documents
+    #     for i, doc in enumerate(documents):
+    #         doc.__dict__["_vectors"] = {"hf-provider": embeddings.json()["data"][i]["embedding"]}
 
-        # Update documents
-        print(f"Updating batch {batch_num}...")
-        index.update_documents([d.__dict__ for d in documents])
-        
-        offset += batch_size
-        batch_num += 1
-        print(f"Completed batch {batch_num - 1}\n")
+    #     # Update documents
+    #     print(f"Updating batch {batch_num}...")
+    #     result = index.update_documents([d.__dict__ for d in documents])
+    #     print(result.task_uid)
+    #
+    #     offset += batch_size
+    #     batch_num += 1
+    #     print(f"Completed batch {batch_num - 1}\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Update Meilisearch documents with embeddings.")
-    parser.add_argument("--index", type=str, required=True, help="Meilisearch index name")
-    parser.add_argument("--meilisearch-url", type=str, default="http://localhost:7700", help="Meilisearch URL")
-    parser.add_argument("--meilisearch-key", type=str, default=None, help="Meilisearch API key")
-    parser.add_argument("--batch-size", type=int, default=50, help="Batch size for processing")
-    
+    parser = argparse.ArgumentParser(
+        description="Update Meilisearch documents with embeddings."
+    )
+    parser.add_argument(
+        "--index", type=str, required=True, help="Meilisearch index name"
+    )
+    parser.add_argument(
+        "--meilisearch-url",
+        type=str,
+        default="http://localhost:7700",
+        help="Meilisearch URL",
+    )
+    parser.add_argument(
+        "--meilisearch-key", type=str, default=None, help="Meilisearch API key"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=50, help="Batch size for processing"
+    )
+
     args = parser.parse_args()
-    
+
     # Initialize Meilisearch client
     client = Client(args.meilisearch_url, args.meilisearch_key)
-    
+
     # Process documents in batches
     print(f"Starting to process documents from index: {args.index}")
     process_documents_in_batches(client, args.index, args.batch_size)
-    
+
     print("All documents processed successfully!")
 
 
