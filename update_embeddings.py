@@ -22,17 +22,16 @@ def process_documents_in_batches(
     # llama_client = httpx.Client()
     result = index.update_embedders(
         {
-            "LLAMA_PROVIDER": {
+            "LLAMA_JINA_PROVIDER": {
                 "source": "rest",
                 "dimensions": 768,
-                "url": "http://100.87.243.70:9000/v1/embeddings",
+                "url": "http://100.87.243.70:10000/embeddings",
                 "request": {
                     "model": "jinaai/jina-embeddings-v5-text-nano-retrieval",
-                    "input": ["{{text}}", "{{..}}"],
+                    "input": ["{{text}}"],
                 },
-                "response": {"data": [{"embedding": "{{embedding}}"}, "{{..}}"]},
-                "apiKey": "PROVIDER_API_KEY",
-                "documentTemplate": "Document: ",
+                "response": [{"embedding": ["{{embedding}}"]}],
+                "documentTemplate": "Document: {{doc.__discussions}}",
             }
         }
     )
