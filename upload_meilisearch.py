@@ -130,7 +130,7 @@ def upload_documents_from_path(
         collection.update_searchable_attributes(searchable_attributes)
         collection.update_filterable_attributes(filterable_attributes)
         collection.update_sortable_attributes(sortable_attributes)
-        collection.update_distinct_attribute("file_name")
+        # collection.update_distinct_attribute("file_name")
 
     # Process and upload documents
     metadata_to_process = metadata[:limit] if limit else metadata
