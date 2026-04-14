@@ -1,6 +1,6 @@
 import argparse
 import typesense
-from metadata_handler import STATE_CODES, BASE_FIELDS, METADATA_SCHEMA
+from metadata_schema import STATE_CODES, BASE_FIELDS, METADATA_SCHEMA
 
 
 TYPESENSE_CONFIG = {
