@@ -92,6 +92,7 @@ dependencies = [
     { name = "httpx" },
     { name = "meilisearch" },
     { name = "more-itertools" },
+    { name = "pydantic" },
     { name = "tqdm" },
     { name = "typesense" },
 ]
@@ -101,6 +102,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "meilisearch", specifier = ">=0.40.0" },
     { name = "more-itertools", specifier = ">=10.8.0" },
+    { name = "pydantic", specifier = ">=2.12.5" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typesense", specifier = ">=1.3.0" },
 ]
