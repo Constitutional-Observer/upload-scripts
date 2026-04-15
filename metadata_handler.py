@@ -28,6 +28,7 @@ TN_SESSION_RE = re.compile(r"(\d+)\.(\d+)")
 
 # UP (Uttar Pradesh) regex patterns - not needed as fields are already numeric
 
+
 def word_to_num(word: str) -> int:
     w2n = {
         "First": 1,
@@ -136,7 +137,7 @@ def normalize_metadata_ka(metadata: dict) -> LegislatureMetadata:
     date_str = metadata.get("date", "0000-00-00")
     try:
         year, month, day = map(int, date_str.split("-"))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         year, month, day = 0, 0, 0
 
     # Term
@@ -155,31 +156,31 @@ def normalize_metadata_ka(metadata: dict) -> LegislatureMetadata:
     session = int(session_match.group(1)) if session_match else 0
 
     return LegislatureMetadata(
-        state_code= "KA",
-        languages= metadata.get("language", []),
-        year= year,
-        month= month,
-        day= day,
-        title_en= metadata.get("kla_debate_title_subject_eng", ""),
+        state_code="KA",
+        languages=metadata.get("language", []),
+        year=year,
+        month=month,
+        day=day,
+        title_en=metadata.get("kla_debate_title_subject_eng", ""),
         # Extra fields for KA
-        discussions= metadata.get("kla_debate_title_subject_kan", ""),
-        house= "Legislative Assembly",
-        session= session,
-        term_number= term_number,
-        term_start= term_start,
-        term_end= term_end,
-        archive_link= metadata["identifier-access"],
-        section_type= metadata.get("kla_sectiontype"),
-        start_page= int(metadata.get("kla_startpage", 0)),
-        end_page= int(metadata.get("kla_endpage", 0)),
-        book_id= int(metadata.get("kla_bookid", 0)),
-        place_session= metadata.get("kla_placesession"),
-        minister_en= metadata.get("kla_minister_name_eng"),
-        minister_kn= metadata.get("kla_minister_name_kan"),
-        questioner_en= metadata.get("kla_questioner_name_eng"),
-        questioner_kn= metadata.get("kla_questioner_name_kan"),
-        participants_en= metadata.get("kla_debate_participants_eng"),
-        participants_kn= metadata.get("kla_debate_participants_kan"),
+        discussions=metadata.get("kla_debate_title_subject_kan", ""),
+        house="Legislative Assembly",
+        session=session,
+        term_number=term_number,
+        term_start=term_start,
+        term_end=term_end,
+        archive_link=metadata["identifier-access"],
+        section_type=metadata.get("kla_sectiontype"),
+        start_page=int(metadata.get("kla_startpage", 0)),
+        end_page=int(metadata.get("kla_endpage", 0)),
+        book_id=int(metadata.get("kla_bookid", 0)),
+        place_session=metadata.get("kla_placesession"),
+        minister_en=metadata.get("kla_minister_name_eng"),
+        minister_kn=metadata.get("kla_minister_name_kan"),
+        questioner_en=metadata.get("kla_questioner_name_eng"),
+        questioner_kn=metadata.get("kla_questioner_name_kan"),
+        participants_en=metadata.get("kla_debate_participants_eng"),
+        participants_kn=metadata.get("kla_debate_participants_kan"),
     )
 
 
@@ -191,7 +192,7 @@ def normalize_metadata_kl(metadata: dict) -> LegislatureMetadata:
     date_str = metadata.get("date", "0000-00-00")
     try:
         year, month, day = map(int, date_str.split("-"))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         year, month, day = 0, 0, 0
 
     # Extract subjects as a comma-separated string
@@ -201,16 +202,16 @@ def normalize_metadata_kl(metadata: dict) -> LegislatureMetadata:
     )
 
     return LegislatureMetadata(
-        state_code= "KL",
-        languages= metadata.get("languages", []),
-        year= year,
-        month= month,
-        day= day,
+        state_code="KL",
+        languages=metadata.get("languages", []),
+        year=year,
+        month=month,
+        day=day,
         title_en=metadata.get("title", ""),
         # KL-specific fields
-        discussions= metadata.get("description", ""),
-        subject= subjects,
-        archive_link= metadata["identifier-access"],
+        discussions=metadata.get("description", ""),
+        subject=subjects,
+        archive_link=metadata["identifier-access"],
     )
 
 
@@ -221,7 +222,7 @@ def normalize_metadata_rj(metadata: dict) -> LegislatureMetadata:
     date_str = metadata.get("date", "00/00/0000")
     try:
         day, month, year = map(int, date_str.split("/"))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         day, month, year = 0, 0, 0
 
     # Assembly number extraction from metadata field
@@ -336,7 +337,7 @@ def normalize_metadata_tn(metadata: dict) -> LegislatureMetadata:
     date_str = metadata.get("tnla_date", "00-00-0000")
     try:
         day, month, year = map(int, date_str.split("-"))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         day, month, year = 0, 0, 0
 
     # Assembly/Term extraction from tnla_assembly_no
@@ -383,7 +384,7 @@ def normalize_metadata_up(metadata: dict) -> LegislatureMetadata:
     date_str = metadata.get("date", "00-00-0000")
     try:
         day, month, year = map(int, date_str.split("-"))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         day, month, year = 0, 0, 0
 
     # Assembly/Term extraction from up_legislature_assembly_number
@@ -446,9 +447,8 @@ def normalize_metadata_wb(metadata: dict) -> LegislatureMetadata:
     except ValueError:
         year = 0
 
-    # For month and day, we'll use 0 as defaults since the metadata doesn't provide specific dates
-    # The westbengal_legislature_dates field contains multiple dates, but we'll use the year from above
-    month, day = 0, 0
+    # WB has a series of dates for each file, use the first for now
+    year, month, day = metadata["westbengal_legislature_dates"].split(".")[0:3]
 
     # Extract term number from westbengal_legislature_document_id
     # This appears to be a document ID, but we'll map it to term_number for consistency
@@ -487,7 +487,7 @@ def normalize_metadata_wb(metadata: dict) -> LegislatureMetadata:
                     term_end = int(second_date_parts[2])
                 else:
                     term_end = year if year != 0 else 0
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 term_start = year if year != 0 else 0
                 term_end = year if year != 0 else 0
         else:
