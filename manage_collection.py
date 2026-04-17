@@ -328,9 +328,7 @@ def main():
     with open(args.config) as f:
         meilisearch_config = yaml.safe_load(f)
 
-    client = meilisearch.Client(meilisearch_config["connection"]["URL"], api_key=meilisearch_config["connection"]["API_KEY"])
-
-    states = args.states if args.states else STATE_CODES
+    states = args.states
 
     match args.action:
         case "delete":
