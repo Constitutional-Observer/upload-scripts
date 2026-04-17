@@ -70,9 +70,9 @@ class LegislatureMetadataBase(BaseModel):
     """
     state_code: Annotated[str, {"facet": False, "description": "State code"}]
     file_name: Annotated[str, {"facet": False, "description": "File name"}]
-    year: Annotated[int, {"facet": True, "description": "Year"}]
-    month: Annotated[int, {"facet": True, "description": "Month"}]
-    day: Annotated[int, {"facet": True, "description": "Day"}]
+    year: Annotated[int, {"facet": True, "description": "Year", "searchable": True}]
+    month: Annotated[int, {"facet": True, "description": "Month", "searchable": True}]
+    day: Annotated[int, {"facet": True, "description": "Day", "searchable": True}]
     title_en: Annotated[str, {"facet": False, "description": "Title in English"}]
     archive_link: Annotated[str, {"facet": False, "description": "Archive link"}]
 
@@ -93,13 +93,11 @@ class LegislatureMetadataBase(BaseModel):
             # Check if this field has Annotated metadata
             if name in annotations:
                 annotation = annotations[name]
-                if hasattr(annotation, '__metadata__'):
-                    for metadata in annotation.__metadata__:
-                        if isinstance(metadata, dict):
-                            facet = metadata.get('facet', False)
-                            locale = metadata.get('locale', None)
-                            description = metadata.get('description', "")
-                            break
+                for metadata in annotation.__metadata__:
+                    facet = metadata.get('facet', False)
+                    locale = metadata.get('locale', None)
+                    description = metadata.get('description', "")
+                    break
             
             # Convert Python type to schema type
             type_map = {
