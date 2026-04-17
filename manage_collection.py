@@ -74,7 +74,7 @@ def delete_collections(index_names: list[str], meilisearch_config: dict):
 
     for index_name in index_names:
         print(f"Deleting: {index_name}")
-        confirm = input("Press y to confirm")
+        confirm = input("Press y to confirm: ")
         if confirm != "y":
             continue
         try:
