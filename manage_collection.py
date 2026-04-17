@@ -322,8 +322,8 @@ def main():
         help="Path to directory containing data all_metadata.json and downloads (required for upload action)",
     )
     parser.add_argument(
-        "--indexes",
-        help="indexes to delete"
+        "--index",
+        help="index to delete"
     )
 
     args = parser.parse_args()
@@ -336,7 +336,7 @@ def main():
 
     match args.action:
         case "delete":
-            delete_collections(args.indexes, meilisearch_config)
+            delete_collections([args.index], meilisearch_config)
         case "create":
             create_collections(states, meilisearch_config)
         case "print_schema":
