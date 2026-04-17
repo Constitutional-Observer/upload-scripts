@@ -12,8 +12,17 @@ import meilisearch.index
 from tqdm import tqdm
 import yaml
 
-from metadata_schema import STATE_CODES, METADATA_SCHEMA
+from metadata_schema import STATE_CODES, STATE_METADATA_CLASSES
 from metadata_handler import normalize_metadata
+
+
+def get_client(meilisearch_config: dict) -> meilisearch.Client:
+    client = meilisearch.Client(
+        meilisearch_config["connection"]["URL"], meilisearch_config["connection"]["API_KEY"]
+    )
+    # Test connection
+    client.health()
+    return client
 
 
 def chunk_file(file_text: str) -> list[str]:
@@ -61,15 +70,7 @@ def chunk_file(file_text: str) -> list[str]:
 
 def delete_collections(states, meilisearch_config: dict):
     """Delete Meilisearch collections for specified states"""
-    try:
-        client = meilisearch.Client(
-            meilisearch_config["host"], meilisearch_config.get("api_key")
-        )
-        # Test connection
-        client.health()
-    except Exception as e:
-        print(f"Failed to connect to Meilisearch: {e}")
-        return
+    client = get_client(meilisearch_config)
 
     for state_code in states:
         collection_name = f"state_legislature_debates_{state_code.lower()}"
@@ -84,32 +85,24 @@ def delete_collections(states, meilisearch_config: dict):
 
 def create_collections(states, meilisearch_config: dict):
     """Create Meilisearch collections for specified states"""
-    try:
-        client = meilisearch.Client(
-            meilisearch_config["host"], meilisearch_config.get("api_key")
-        )
-        # Test connection
-        client.health()
-    except Exception as e:
-        print(f"Failed to connect to Meilisearch: {e}")
-        return
+    client = get_client(meilisearch_config)
 
     for state_code in states:
         collection_name = f"state_legislature_debates_{state_code.lower()}"
 
         # Base searchable attributes
-        searchable_attributes = ["__discussions", "title_en"]
-        filterable_attributes = ["state_code", "year", "month", "day"]
-        sortable_attributes = ["year", "month", "day"]
+        searchable_attributes = []
+        filterable_attributes = []
+        sortable_attributes = []
 
-        # Add state-specific searchable attributes
-        if state_code in METADATA_SCHEMA:
-            for field in METADATA_SCHEMA[state_code]:
-                field_name = field["name"]
-                if field_name not in searchable_attributes:
-                    searchable_attributes.append(field_name)
-                if field.get("facet"):
-                    filterable_attributes.append(field_name)
+        for field in STATE_METADATA_CLASSES[state_code].get_field_schema():
+            field_name = field["name"]
+            if field_name not in searchable_attributes:
+                searchable_attributes.append(field_name)
+            if field.get("facet"):
+                filterable_attributes.append(field_name)
+            if field.get("searchable"):
+                searchable_attributes.append(field_name)
 
         try:
             # Create collection
@@ -130,15 +123,7 @@ def create_collections(states, meilisearch_config: dict):
 
 def print_collections_info(states, meilisearch_config: dict):
     """Print information about Meilisearch collections"""
-    try:
-        client = meilisearch.Client(
-            meilisearch_config["host"], meilisearch_config.get("api_key")
-        )
-        # Test connection
-        client.health()
-    except Exception as e:
-        print(f"Failed to connect to Meilisearch: {e}")
-        return
+    client = get_client(meilisearch_config)
 
     for state_code in states:
         collection_name = f"state_legislature_debates_{state_code.lower()}"
@@ -251,7 +236,7 @@ def _upload_one_document(
 
 def upload_documents_from_path(
     files_path: Path,
-    client: meilisearch.Client,
+    meilisearch_config: dict,
     limit: int | None = None,
     prefix: str = "state_legislature_debates",
 ) -> None:
@@ -267,6 +252,7 @@ def upload_documents_from_path(
 
     metadata_file = files_path / "all_metadata.json"
     metadata = _get_metadata(metadata_file)
+    client = get_client(meilisearch_config)
 
     responses = []
     metadata_errors = []
@@ -336,7 +322,7 @@ def main():
     args = parser.parse_args()
 
     # Meilisearch configuration
-    with open(args.meilisearch_config) as f:
+    with open(args.config) as f:
         meilisearch_config = yaml.safe_load(f)
 
     client = meilisearch.Client(meilisearch_config["connection"]["URL"], api_key=meilisearch_config["connection"]["API_KEY"])
@@ -354,7 +340,7 @@ def main():
             if not args.filename:
                 parser.error("--filename is required for upload action")
             path = Path(args.filename)
-            upload_documents_from_path(path, client, args.limit, args.prefix)
+            upload_documents_from_path(path, meilisearch_config, args.limit, args.prefix)
         case _:
             print("Unexpected argument:", args.action)
 
