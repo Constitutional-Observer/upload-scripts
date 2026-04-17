@@ -68,19 +68,17 @@ def chunk_file(file_text: str) -> list[str]:
     return chunks
 
 
-def delete_collections(states, meilisearch_config: dict):
+def delete_collections(index_name, meilisearch_config: dict):
     """Delete Meilisearch collections for specified states"""
     client = get_client(meilisearch_config)
 
-    for state_code in states:
-        collection_name = f"state_legislature_debates_{state_code.lower()}"
-        try:
-            client.index(collection_name).delete()
-            print(f"Deleted collection: {collection_name}")
-        except meilisearch.errors.MeilisearchApiError:
-            print(f"Collection {collection_name} does not exist or already deleted")
-        except Exception as e:
-            print(f"Could not delete collection {collection_name}: {e}")
+    try:
+        client.index(index_name).delete()
+        print(f"Deleted collection: {index_name}")
+    except meilisearch.errors.MeilisearchApiError:
+        print(f"Collection {index_name} does not exist or already deleted")
+    except Exception as e:
+        print(f"Could not delete collection {index_name}: {e}")
 
 
 def create_collections(states, meilisearch_config: dict):
