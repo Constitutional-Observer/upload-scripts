@@ -348,9 +348,9 @@ def main():
         case "print_schema":
             print_collections_info(states, meilisearch_config)
         case "upload":
-            if not args.filename:
-                parser.error("--filename is required for upload action")
-            path = Path(args.filename)
+            if not args.files_path:
+                parser.error("--files_path is required for upload action")
+            path = Path(args.files_path)
             upload_documents_from_path(path, meilisearch_config, args.limit, args.prefix)
         case _:
             print("Unexpected argument:", args.action)
