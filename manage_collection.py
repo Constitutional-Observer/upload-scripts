@@ -86,12 +86,12 @@ def delete_collections(index_names: list[str], meilisearch_config: dict):
             print(f"Could not delete collection {index_name}: {e}")
 
 
-def create_collections(states, meilisearch_config: dict):
+def create_collections(states, meilisearch_config: dict, prefix: str = "state_legislature_debates"):
     """Create Meilisearch collections for specified states"""
     client = get_client(meilisearch_config)
 
     for state_code in states:
-        collection_name = f"state_legislature_debates_{state_code.lower()}"
+        collection_name = f"{prefix}_{state_code.lower()}"
 
         # Base searchable attributes
         searchable_attributes = []
@@ -344,7 +344,7 @@ def main():
         case "delete":
             delete_collections([args.index], meilisearch_config)
         case "create":
-            create_collections(states, meilisearch_config)
+            create_collections(states, meilisearch_config, args.prefix)
         case "print_schema":
             print_collections_info(states, meilisearch_config)
         case "upload":
