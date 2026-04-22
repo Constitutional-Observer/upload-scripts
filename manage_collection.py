@@ -123,6 +123,12 @@ def create_collections(states, meilisearch_config: dict):
         except Exception as e:
             print(f"Could not create/update collection {collection_name}: {e}")
 
+    if (
+        "index_config" in meilisearch_config
+        and "embeddings" in meilisearch_config["index_config"]
+    ):
+        collection.update_embedders(meilisearch_config["index_config"]["embeddings"])
+
 
 def print_collections_info(states, meilisearch_config: dict):
     """Print information about Meilisearch collections"""
