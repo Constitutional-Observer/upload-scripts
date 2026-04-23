@@ -222,16 +222,18 @@ def _upload_one_document(
         # Use larger batch size for better performance
         batch_size = 100000
         task_ids = []
+        counts = 0
 
         for i, batch in enumerate(batched(documents, batch_size)):
             task = collection.add_documents(batch, primary_key="id")
             task_ids.append(task.task_uid)
-            return {}, {
-                "success": True,
-                "batch": i,
-                "count": len(batch),
-                "task_id": task.task_uid,
-            }
+            counts += len(batch)
+
+        return {}, {
+            "success": True,
+            "count": counts,
+            "task_ids": task_ids
+        }
 
         # Wait for all tasks to complete at the end (optional)
         # This can be commented out for even faster uploads
@@ -277,6 +279,7 @@ def upload_documents_from_path(
     metadata_to_process = metadata[:limit] if limit else metadata
 
     for item in tqdm(metadata_to_process, desc=f"Processing {state_code} documents"):
+        print(item)
         _upload_one_document(item, state_code, files_path, collection)
 
     # Save responses and errors
