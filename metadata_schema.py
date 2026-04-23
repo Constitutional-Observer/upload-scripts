@@ -82,7 +82,7 @@ class LegislatureMetadataBase(BaseModel):
         schema = []
         
         # Get the original annotations to access metadata
-        annotations = cls.__annotations__
+        annotations = _get_all_annotations(cls)
         
         for name, field_info in cls.model_fields.items():
             # Get metadata from Annotated type
@@ -127,8 +127,11 @@ class LegislatureMetadataBase(BaseModel):
             schema.append(field_def)
         return schema
 
-# Generate base fields from the base class
-BASE_FIELDS = LegislatureMetadataBase.get_field_schema()
+def _get_all_annotations(cls):
+    annotations = {}
+    for base in reversed(cls.__mro__):
+        annotations.update(getattr(base, '__annotations__', {}))
+    return annotations
 
 class LegislatureMetadataAP(LegislatureMetadataBase):
     """Andhra Pradesh specific metadata fields"""
@@ -199,7 +202,7 @@ STATE_METADATA_CLASSES = {
 }
 
 
-def get_metadata_schema(state_code: str | None = None) -> dict[str, list[dict[str, Any]]] | list[dict[str, Any]]:
+def get_metadata_schema(state_code: str) -> list[dict[str, Any]]:
     """
     Generate metadata schema for a specific state or all states.
     This is only needed when creating/updating search indexes.
@@ -210,39 +213,16 @@ def get_metadata_schema(state_code: str | None = None) -> dict[str, list[dict[st
     Returns:
         Dictionary of state_code -> schema for all states, or just the schema list for one state.
     """
-    if state_code:
-        # Generate schema for a single state
-        if state_code not in STATE_METADATA_CLASSES:
-            raise ValueError(f"Unknown state code: {state_code}")
-        
-        metadata_class = STATE_METADATA_CLASSES[state_code]
-        # Get state-specific fields (excluding base class fields)
-        state_fields = []
-        for field_def in metadata_class.get_field_schema():
-            if field_def["name"] not in [f["name"] for f in BASE_FIELDS]:
-                state_fields.append(field_def)
-        
-        # Start with discussions field (common to all states)
-        schema = [{"name": "discussions", "type": "string"}]
-        schema.extend(state_fields)
-        return schema
-    else:
-        # Generate schema for all states
-        schema = {}
-        for state_code in STATE_CODES:
-            schema[state_code] = get_metadata_schema(state_code)
-        return schema
-
-
-# For backward compatibility, keep METADATA_SCHEMA as a module-level variable
-# but make it lazy-loaded
-_METADATA_SCHEMA = None
-
-def __getattr__(name: str) -> Any:
-    """Lazy load METADATA_SCHEMA on first access"""
-    if name == "METADATA_SCHEMA":
-        global _METADATA_SCHEMA
-        if _METADATA_SCHEMA is None:
-            _METADATA_SCHEMA = get_metadata_schema()
-        return _METADATA_SCHEMA
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    if state_code not in STATE_METADATA_CLASSES:
+        raise ValueError(f"Unknown state code: {state_code}")
+    
+    metadata_class = STATE_METADATA_CLASSES[state_code]
+    # Get state-specific fields (excluding base class fields)
+    state_fields = []
+    for field_def in metadata_class.get_field_schema():
+        state_fields.append(field_def)
+    
+    # Start with discussions field (common to all states)
+    schema = [{"name": "discussions", "type": "string"}]
+    schema.extend(state_fields)
+    return schema
