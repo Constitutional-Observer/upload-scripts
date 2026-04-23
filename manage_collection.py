@@ -107,6 +107,8 @@ def create_collections(states, meilisearch_config: dict, prefix: str = "state_le
             if field.get("searchable"):
                 searchable_attributes.append(field_name)
 
+        searchable_attributes.append("__discussions")
+
         try:
             # Create collection
             collection = client.index(collection_name)
@@ -279,8 +281,8 @@ def upload_documents_from_path(
     metadata_to_process = metadata[:limit] if limit else metadata
 
     for item in tqdm(metadata_to_process, desc=f"Processing {state_code} documents"):
-        print(item)
-        _upload_one_document(item, state_code, files_path, collection)
+        results = _upload_one_document(item, state_code, files_path, collection)
+        responses.append(results[1])
 
     # Save responses and errors
     with open(f"meilisearch_upload_{state_code}.json", "w") as f:
