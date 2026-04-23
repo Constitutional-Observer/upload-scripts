@@ -69,7 +69,7 @@ class LegislatureMetadataBase(BaseModel):
     the additional fields it will provide (can also be no additional fields)
     """
     state_code: Annotated[str, {"facet": False, "description": "State code"}]
-    file_name: Annotated[str, {"facet": False, "description": "File name"}]
+    file_name: Annotated[str, {"facet": True, "description": "File name"}]
     year: Annotated[int, {"facet": True, "description": "Year", "searchable": True}]
     month: Annotated[int, {"facet": True, "description": "Month", "searchable": True}]
     day: Annotated[int, {"facet": True, "description": "Day", "searchable": True}]
