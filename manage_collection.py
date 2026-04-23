@@ -12,7 +12,7 @@ import meilisearch.index
 from tqdm import tqdm
 import yaml
 
-from metadata_schema import STATE_CODES, STATE_METADATA_CLASSES
+from metadata_schema import get_metadata_schema
 from metadata_handler import normalize_metadata
 
 
@@ -98,7 +98,7 @@ def create_collections(states, meilisearch_config: dict, prefix: str = "state_le
         filterable_attributes = []
         sortable_attributes = []
 
-        for field in STATE_METADATA_CLASSES[state_code].get_field_schema():
+        for field in get_metadata_schema(state_code):
             field_name = field["name"]
             if field_name not in searchable_attributes:
                 searchable_attributes.append(field_name)
