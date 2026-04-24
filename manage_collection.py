@@ -181,13 +181,13 @@ def _upload_one_document(
     state_code: str,
     files_path: Path,
     collection: meilisearch.index.Index,
-):
+) -> dict:
     # Find the DJVU text file
     file_name = _find_djvu_file(item.get("files", []))
 
     if not file_name:
         metadata_error = {"item": item, "error": "DJVU file not found"}
-        return metadata_error, {}
+        return metadata_error
 
     try:
         # Normalize metadata
@@ -231,7 +231,7 @@ def _upload_one_document(
             task_ids.append(task.task_uid)
             counts += len(batch)
 
-        return {}, {
+        return {
             "success": True,
             "count": counts,
             "task_ids": task_ids
@@ -244,7 +244,7 @@ def _upload_one_document(
 
     except Exception as e:
         print(f"Error uploading documents: {e}")
-        return {}, {"success": False, "error": str(e), "documents": len(documents)}
+        return {"success": False, "error": str(e), "documents": len(documents)}
 
 
 def upload_documents_from_path(
@@ -282,7 +282,7 @@ def upload_documents_from_path(
 
     for item in tqdm(metadata_to_process, desc=f"Processing {state_code} documents"):
         results = _upload_one_document(item, state_code, files_path, collection)
-        responses.append(results[1])
+        responses.append(results)
 
     # Save responses and errors
     with open(f"meilisearch_upload_{state_code}.json", "w") as f:
@@ -292,7 +292,7 @@ def upload_documents_from_path(
 
     print(f"Upload completed for {state_code}")
     print(
-        f"Total documents processed: {sum(r.get('count', 0) for r in responses if r.get('success'))}"
+        f"Total documents processed: {sum(r["count"] for r in responses if not r.get('error'))}"
     )
     print(f"Metadata errors: {len(metadata_errors)}")
 
