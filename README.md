@@ -1,78 +1,155 @@
-# Constitutional Observer Upload Scripts
+# Constitutional Observer Search
 
-This repo hosts scripts to upload archived files from various Indian State institutions, such as the state legislature debates, state archives, high court records, gazette orders, government orders, and more.
+Index and search Indian state legislative debates, archives, high court records, gazettes, and government orders.
 
-## Structure
+This repository provides tools to upload, index, and search digitized archival documents from Indian state institutions using [Meilisearch](https://www.meilisearch.com/).
 
-### `metadata_schema.py`
-Defines the schemas for each archive type, i.e. the list of fields that are indexed, filterable and searchable, along with data types for each state archive, legislature debate, etc.
-Field names have been made common among the different archives where possible.
+## Goals
 
-### `metadata_hander.py`
-Handlers for metadata of each of the index types. Converts the data from the Internet Archive metadata_all.json format into a normalized format.
-For e.g. the West Bengal State Legistlature Debate date has been normalized to match the format of the other state debate dates.
+- **Normalized metadata**: Common schema across different state archives
+- **Chunking**: Documents split into searchable chunks (200 words by default)
+- **Embedding support**: Configure embeddings for semantic search
 
-### `manage_collection.py`
-Script that handles creation, deletion of indexes and uploading of files to the indexes.
+---
+
+## Setup
+
+```bash
+# Install dependencies
+uv sync
+
+# Activate virtual environment
+source .venv/bin/activate
+```
+
+## Configuration
+
+Create `meilisearch_config.yaml`:
+
+```yaml
+connection:
+  URL: http://localhost:7700
+  API_KEY: api_key
+
+index_config:
+  embeddings:
+    LLAMA_JINA_PROVIDER:
+      source: "rest"
+      dimensions: 768
+      url: "http://your-embedding-service:8080/embeddings"
+      request:
+        model: "jinaai/jina-embeddings-v5-text-nano-retrieval"
+        input: ["{{text}}"]
+      response: [{"embedding": ["{{embedding}}"]}]
+      documentTemplate: "Document: {{doc.__discussions}}"
+```
+If the embeddings field is removed, no embeddings will be configured for the index.
+
+---
 
 ## Usage
 
-0. Install the required dependencies using `uv sync`. Then activate the environment with `source .venv/bin/activate`
-1. Make sure the files you are uploading have the schema and handler defined in the respective python directories.
-   The manage_collection script expects to be able to find the handler by matching the directory name (See below for directory structure reference)
-2. Create a `meilisearch_config.yaml` file. This includes embeddings config and the meilisearch connection details.
-3. Create the index. Run `python manage_collection.py create --states <list of states, separated by spaces>`. E.g. `python manage_collection.py create --states KA AS` will create the index for the state legislature debates of Karnataka and Assam.
-4. Upload documents: `python manage_collection.py upload /path/to/directory/with/metadata_and_files`. E.g. `python manage_collection.py upload /datasets/legislature_debates/AS` will upload files for Assam.
+### CLI Reference
 
-
-## Example folder structure
-
-```
-  /datasets/legislature_debates/
-├── AS
-│   ├── all_metadata.json
-│   ├── downloads
-  
+```bash
+python manage_collection.py <action> [options] [path]
 ```
 
-## Metadata Structure
+| Action | Description | Required Args |
+|--------|-------------|---------------|
+| `create` | Create indexes for states | `--states <STATE_CODES>` |
+| `delete` | Delete an index | `--index <NAME>` |
+| `upload` | Upload documents | `<files_path>` |
+| `print_schema` | Show index info | `--states <STATE_CODES>` |
 
-Metadata refers to additional fields that are used for making the archives more searchable. Currently the following fields are available:
+**Options:**
+- `--states <CODES>`: State codes (e.g., `KA AS TN`)
+- `--config <FILE>`: Config file path (default: `meilisearch_config.yaml`)
+- `--prefix <PREFIX>`: Index name prefix (default: `state_legislature_debates`)
+- `--limit <N>`: Limit documents to process
+- `--index <NAME>`: Index name for delete action
 
-```python
-class LegislatureMetadata(TypedDict):
-    state_code: str
-    languages: list[str]
+### Examples
 
-    year: int
-    month: int
-    day: int
-    title_en: str
-    archive_link: str
+```bash
+# Create indexes for Karnataka and Assam
+python manage_collection.py create --states KA AS
 
-    house: NotRequired[str]
-    session: NotRequired[int]
-    sitting_number: NotRequired[int]
-    sitting_start_year: NotRequired[int]
-    sitting_start_month: NotRequired[int]
-    sitting_start_day: NotRequired[int]
-    sitting_end_year: NotRequired[int]
-    sitting_end_month: NotRequired[int]
-    sitting_end_day: NotRequired[int]
-    term_number: NotRequired[int]
-    term_start: NotRequired[int]
-    term_end: NotRequired[int]
+# Upload documents for Assam
+python manage_collection.py upload /datasets/legislature_debates/AS
 
-    section_type: NotRequired[str]
-    start_page: NotRequired[int]
-    end_page: NotRequired[int]
-    book_id: NotRequired[int]
-    place_session: NotRequired[str]
-    minister_en: NotRequired[str]
-    minister_kn: NotRequired[str]
-    questioner_en: NotRequired[str]
-    questioner_kn: NotRequired[str]
-    participants_en: NotRequired[str]
-    participants_kn: NotRequired[str]
-    discussions: NotRequired[str]
+# Upload with limit (test with 100 docs)
+python manage_collection.py upload /datasets/legislature_debates/AS --limit 100
+
+# Delete an index (prompts for confirmation)
+python manage_collection.py delete --index state_legislature_debates_as
+
+# View index schema
+python manage_collection.py print_schema --states KA
 ```
+
+---
+
+### Archive Directory Structure
+
+```
+/
+└── /datasets/
+    └── legislature_debates/
+        └── <STATE_CODE>/   # e.g., AS, KA, TN
+            ├── all_metadata.json   # Internet Archive metadata (JSONL)
+            └── downloads/          # Extracted text files (_djvu.txt)
+```
+
+---
+
+### Input Format
+
+Each state directory must contain:
+- `all_metadata.json` - JSONL file with Internet Archive item metadata
+- `downloads/` - Directory with extracted text files (`._djvu.txt`)
+
+### Metadata Schema
+
+See [`metadata_schema.py`](metadata_schema.py) for complete field definitions.
+
+**Core fields (all archives):**
+
+| Field | Type | Facet | Searchable | Description |
+|-------|------|-------|------------|-------------|
+| `state_code` | str | Yes | Yes | State abbreviation (AP, AS, KA, etc.) |
+| `year` | int | Yes | Yes | Document year |
+| `month` | int | Yes | Yes | Document month |
+| `day` | int | Yes | Yes | Document day |
+| `title_en` | str | No | Yes | English title |
+| `archive_link` | str | No | No | Internet Archive URL |
+| `file_name` | str | Yes | No | Source filename |
+
+**Legislature-specific fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `house` | str | Legislative house (Lok Sabha, Rajya Sabha, etc.) |
+| `session` | int | Session number |
+| `sitting_number` | int | Sitting number within session |
+| `sitting_start_*` | int | Sitting start date (year/month/day) |
+| `sitting_end_*` | int | Sitting end date (year/month/day) |
+| `term_number` | int | Legislative term |
+| `section_type` | str | Section classification |
+| `minister_en` | str | Minister name (English) |
+| `minister_kn` | str | Minister name (Kannada) |
+| `participants_en` | str | Participants list |
+| `discussions` | str | Full debate text |
+
+See [`LegislatureMetadata`](metadata_schema.py) for complete field list.
+
+**Supported state codes:** `AP`, `AS`, `RJ`, `KA`, `KL`, `TN`, `TS`, `UP`, `WB`, `TG`
+
+---
+
+## Workflow
+
+1. **Extract**: Download files from Internet Archive, extract text (DjVu -> text)
+2. **Organize**: Place in `/datasets/<type>/<STATE>/` with `all_metadata.json` and `downloads/`
+3. **Create**: `python manage_collection.py create --states <CODES>`
+4. **Upload**: `python manage_collection.py upload /datasets/<type>/<STATE>`
