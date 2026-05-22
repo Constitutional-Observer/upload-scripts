@@ -7,6 +7,7 @@ The results can then be used for comparison
 import meilisearch
 import yaml
 import argparse
+import pandas as pd
 
 
 def query_meilisearch(
@@ -28,7 +29,7 @@ def query_meilisearch(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("meilisearch_config")
-    parser.add_argument("queries_file", help="File containing queries, one per line")
+    parser.add_argument("queries_file", help="CSV file with 'primary_search' and 'related' columns")
     parser.add_argument("index_name", help="Name of the index to query")
     parser.add_argument(
         "output_file", help="File to store query results in JSON format"
@@ -49,25 +50,30 @@ def main():
     )
     client.health()
 
-    # Read queries from file
-    with open(args.queries_file) as f:
-        queries = [line.strip() for line in f if line.strip()]
+    # Read queries from CSV file
+    df = pd.read_csv(args.queries_file, skipinitialspace=True)
+    df.columns = df.columns.str.strip()
+    related_map = dict(
+        zip(df["primary_search"].astype(str).str.strip(), df["related"].astype(str).str.strip())
+    )
 
     # Run queries and store results
     results = {}
-    for query in queries:
+    for query in df["primary_search"].astype(str).str.strip():
         print(f"Running query: {query}")
         query_results = query_meilisearch(query, args.index_name, client, args.limit)
 
         # Store full results including hits (actual documents) for NDCG calculation
-        results[query] = {
+        result_entry = {
             "query": query,
-            "hits": query_results.get("hits", []),  # Actual retrieved documents
+            "related_terms": related_map.get(query, ""),
+            "hits": query_results.get("hits", []),
             "processing_time_ms": query_results.get("processingTimeMs"),
             "total_hits": query_results.get("estimatedTotalHits", 0),
             "limit": query_results.get("limit"),
             "offset": query_results.get("offset"),
         }
+        results[query] = result_entry
 
     # Save results to output file
     import json
@@ -76,7 +82,7 @@ def main():
         json.dump(results, f, indent=2)
 
     print(f"Results saved to {args.output_file}")
-    print(f"Processed {len(queries)} queries")
+    print(f"Processed {len(results)} queries")
 
 
 if __name__ == "__main__":
