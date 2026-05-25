@@ -58,7 +58,7 @@ def main():
     )
 
     # Run queries and store results
-    results = {}
+    results = []
     for query in df["primary_search"].astype(str).str.strip():
         print(f"Running query: {query}")
         query_results = query_meilisearch(query, args.index_name, client, args.limit)
@@ -73,7 +73,7 @@ def main():
             "limit": query_results.get("limit"),
             "offset": query_results.get("offset"),
         }
-        results[query] = result_entry
+        results.append(result_entry)
 
     # Save results to output file
     import json
