@@ -11,6 +11,8 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.12.5",
     "pyyaml>=6.0.3",
+    "pandas>=3.0.3",
+    "pyarrow>=24.0.0",
 ]
 
 [tool.uv.sources]
