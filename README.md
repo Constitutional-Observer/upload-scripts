@@ -153,3 +153,34 @@ See [`LegislatureMetadata`](metadata_schema.py) for complete field list.
 2. **Organize**: Place in `/datasets/<type>/<STATE>/` with `all_metadata.json` and `downloads/`
 3. **Create**: `python manage_collection.py create --states <CODES>`
 4. **Upload**: `python manage_collection.py upload /datasets/<type>/<STATE>`
+
+
+## Benchmarking
+
+`run_queries.py` will store the results for a list of predefined queries, provided in CSV format. Sample usage:
+
+```sh
+python run_queries.py configs/prod.yaml sample_queries_kannada.csv state_legislature_debates_ka ka_results.json
+```
+
+This will generate a JSON list `ka_results.json`, with each item corresponding to one query.
+Each item will contain a list of results in `hits`. The results can be compared with previous
+versions to see if search performance has improved.
+
+### Script args:
+
+```
+  usage: run_queries.py [-h] [--limit LIMIT] meilisearch_config queries_file index_name output_file
+
+positional arguments:
+  meilisearch_config
+  queries_file        CSV file with 'primary_search' and 'related' columns
+  index_name          Name of the index to query
+  output_file         File to store query results in JSON format
+
+options:
+  -h, --help          show this help message and exit
+  --limit LIMIT       Maximum number of results per query (default: 20)
+```
+
+Queries can be found in the [wiki](https://github.com/Constitutional-Observer/wiki/tree/main/benchmarking)
