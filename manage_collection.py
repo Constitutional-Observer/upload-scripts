@@ -125,11 +125,20 @@ def create_collections(states, meilisearch_config: dict, prefix: str = "state_le
         except Exception as e:
             print(f"Could not create/update collection {collection_name}: {e}")
 
+    # Update embedders if configured
     if (
         "index_config" in meilisearch_config
         and "embeddings" in meilisearch_config["index_config"]
     ):
         collection.update_embedders(meilisearch_config["index_config"]["embeddings"])
+
+    # Update typo tolerance if configured
+    if (
+        "index_config" in meilisearch_config
+        and "minWordSizeForTypos" in meilisearch_config["index_config"]
+    ):
+        typo_config = meilisearch_config["index_config"]["minWordSizeForTypos"]
+        collection.update_typo_tolerance({"minWordSizeForTypos": typo_config})
 
 
 def print_collections_info(states, meilisearch_config: dict):
