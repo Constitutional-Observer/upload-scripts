@@ -18,18 +18,25 @@ from metadata_handler import normalize_metadata
 
 def get_client(meilisearch_config: dict) -> meilisearch.Client:
     client = meilisearch.Client(
-        meilisearch_config["connection"]["URL"], meilisearch_config["connection"]["API_KEY"]
+        meilisearch_config["connection"]["URL"],
+        meilisearch_config["connection"]["API_KEY"],
     )
     # Test connection
     client.health()
     return client
 
 
-def chunk_file(file_text: str) -> list[str]:
-    """Split file text into chunks by double newlines"""
+def chunk_file(file_text: str, chunk_config: dict) -> list[str]:
+    """Split file text into chunks by double newlines
+
+    Args:
+        file_text: The text to chunk
+        state_code: State code for reference
+        chunk_config: State-specific chunking config containing max_chunk_len
+    """
     import re
 
-    MAX_CHUNK_LEN = 200  # 200 words
+    MAX_CHUNK_LEN = chunk_config["max_chunk_len"]
     current_chunk = ""
     current_chunk_word_count = 0
 
@@ -86,7 +93,9 @@ def delete_collections(index_names: list[str], meilisearch_config: dict):
             print(f"Could not delete collection {index_name}: {e}")
 
 
-def create_collections(states, meilisearch_config: dict, prefix: str = "state_legislature_debates"):
+def create_collections(
+    states, meilisearch_config: dict, prefix: str = "state_legislature_debates"
+):
     """Create Meilisearch collections for specified states"""
     client = get_client(meilisearch_config)
 
@@ -118,27 +127,34 @@ def create_collections(states, meilisearch_config: dict, prefix: str = "state_le
             collection.update_filterable_attributes(filterable_attributes)
             collection.update_sortable_attributes(sortable_attributes)
 
+            # Update embedders if configured
+            if (
+                "index_config" in meilisearch_config
+                and "global" in meilisearch_config["index_config"]
+                and "embeddings" in meilisearch_config["index_config"]["global"]
+            ):
+                collection.update_embedders(
+                    meilisearch_config["index_config"]["global"]["embeddings"]
+                )
+
+            # Update typo tolerance if configured
+            if (
+                "index_config" in meilisearch_config
+                and "global" in meilisearch_config["index_config"]
+                and "minWordSizeForTypos"
+                in meilisearch_config["index_config"]["global"]
+            ):
+                typo_config = meilisearch_config["index_config"]["global"][
+                    "minWordSizeForTypos"
+                ]
+                collection.update_typo_tolerance(typo_config)
+
             print(f"Created/updated collection: {collection_name}")
             print(f"  Searchable attributes: {searchable_attributes}")
             print(f"  Filterable attributes: {filterable_attributes}")
             print(f"  Sortable attributes: {sortable_attributes}")
         except Exception as e:
             print(f"Could not create/update collection {collection_name}: {e}")
-
-    # Update embedders if configured
-    if (
-        "index_config" in meilisearch_config
-        and "embeddings" in meilisearch_config["index_config"]
-    ):
-        collection.update_embedders(meilisearch_config["index_config"]["embeddings"])
-
-    # Update typo tolerance if configured
-    if (
-        "index_config" in meilisearch_config
-        and "minWordSizeForTypos" in meilisearch_config["index_config"]
-    ):
-        typo_config = meilisearch_config["index_config"]["minWordSizeForTypos"]
-        collection.update_typo_tolerance({"minWordSizeForTypos": typo_config})
 
 
 def print_collections_info(states, meilisearch_config: dict):
@@ -190,6 +206,7 @@ def _upload_one_document(
     state_code: str,
     files_path: Path,
     collection: meilisearch.index.Index,
+    chunk_config: dict,
 ) -> dict:
     # Find the DJVU text file
     file_name = _find_djvu_file(item.get("files", []))
@@ -213,7 +230,7 @@ def _upload_one_document(
     with open(discussion_text_path) as f:
         discussion_text = f.read()
 
-    file_chunks = chunk_file(discussion_text)
+    file_chunks = chunk_file(discussion_text, chunk_config)
 
     # Prepare documents for Meilisearch
     documents = []
@@ -240,11 +257,7 @@ def _upload_one_document(
             task_ids.append(task.task_uid)
             counts += len(batch)
 
-        return {
-            "success": True,
-            "count": counts,
-            "task_ids": task_ids
-        }
+        return {"success": True, "count": counts, "task_ids": task_ids}
 
         # Wait for all tasks to complete at the end (optional)
         # This can be commented out for even faster uploads
@@ -279,8 +292,10 @@ def upload_documents_from_path(
         if files_path_str:
             files_path = Path(files_path_str)
         else:
-            raise ValueError("files_path must be provided as argument or state_path in config")
-    
+            raise ValueError(
+                "files_path must be provided as argument or state_path in config"
+            )
+
     if state_code is None:
         state_code = files_path.name
 
@@ -301,8 +316,21 @@ def upload_documents_from_path(
 
     metadata_to_process = metadata[:limit] if limit else metadata
 
+    chunk_config = (
+        meilisearch_config["index_config"]
+        .get(state_code, {})
+        .get(
+            "chunking",
+            meilisearch_config["index_config"]
+            .get("global", {})
+            .get("chunking", {"max_chunk_len": 200}),
+        )
+    )
+
     for item in tqdm(metadata_to_process, desc=f"Processing {state_code} documents"):
-        results = _upload_one_document(item, state_code, files_path, collection)
+        results = _upload_one_document(
+            item, state_code, files_path, collection, chunk_config
+        )
         responses.append(results)
 
     # Save responses and errors
@@ -313,7 +341,7 @@ def upload_documents_from_path(
 
     print(f"Upload completed for {state_code}")
     print(
-        f"Total documents processed: {sum(r["count"] for r in responses if not r.get('error'))}"
+        f"Total documents processed: {sum(r['count'] for r in responses if not r.get('error'))}"
     )
     print(f"Metadata errors: {len(metadata_errors)}")
 
@@ -336,7 +364,7 @@ def main():
         "--config",
         type=str,
         help="Path to Meilisearch config YAML file",
-        default="meilisearch_config.yaml"
+        default="meilisearch_config.yaml",
     )
     parser.add_argument(
         "--limit",
@@ -353,10 +381,7 @@ def main():
         nargs="?",
         help="Path to directory containing data all_metadata.json and downloads (required for upload action if not in config)",
     )
-    parser.add_argument(
-        "--index",
-        help="index to delete"
-    )
+    parser.add_argument("--index", help="index to delete")
     parser.add_argument(
         "--state-code",
         help="State code (optional, can be derived from files_path)",
@@ -380,11 +405,7 @@ def main():
         case "upload":
             path = Path(args.files_path) if args.files_path else None
             upload_documents_from_path(
-                path, 
-                meilisearch_config, 
-                args.state_code,
-                args.limit, 
-                args.prefix
+                path, meilisearch_config, args.state_code, args.limit, args.prefix
             )
         case _:
             print("Unexpected argument:", args.action)
