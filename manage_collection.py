@@ -257,20 +257,32 @@ def _upload_one_document(
 
 
 def upload_documents_from_path(
-    files_path: Path,
+    files_path: Path | None,
     meilisearch_config: dict,
+    state_code: str | None = None,
     limit: int | None = None,
     prefix: str = "state_legislature_debates",
 ) -> None:
     """Upload documents from a state directory to Meilisearch
 
     Args:
-        files_path: Path to state directory containing data
+        files_path: Path to state directory containing data (optional if state_path is in config)
         meilisearch_config: Meilisearch configuration
+        state_code: State code (optional if files_path is provided)
         limit: Optional limit on number of documents to process
         prefix: Prefix for the index name
     """
-    state_code = files_path.name
+    # Determine the files path and state code
+    if files_path is None:
+        # Try to get from config
+        files_path_str = meilisearch_config.get("state_path")
+        if files_path_str:
+            files_path = Path(files_path_str)
+        else:
+            raise ValueError("files_path must be provided as argument or state_path in config")
+    
+    if state_code is None:
+        state_code = files_path.name
 
     metadata_file = files_path / "all_metadata.json"
     metadata = _get_metadata(metadata_file)
@@ -339,11 +351,15 @@ def main():
     parser.add_argument(
         "files_path",
         nargs="?",
-        help="Path to directory containing data all_metadata.json and downloads (required for upload action)",
+        help="Path to directory containing data all_metadata.json and downloads (required for upload action if not in config)",
     )
     parser.add_argument(
         "--index",
         help="index to delete"
+    )
+    parser.add_argument(
+        "--state-code",
+        help="State code (optional, can be derived from files_path)",
     )
 
     args = parser.parse_args()
@@ -362,10 +378,14 @@ def main():
         case "print_schema":
             print_collections_info(states, meilisearch_config)
         case "upload":
-            if not args.files_path:
-                parser.error("--files_path is required for upload action")
-            path = Path(args.files_path)
-            upload_documents_from_path(path, meilisearch_config, args.limit, args.prefix)
+            path = Path(args.files_path) if args.files_path else None
+            upload_documents_from_path(
+                path, 
+                meilisearch_config, 
+                args.state_code,
+                args.limit, 
+                args.prefix
+            )
         case _:
             print("Unexpected argument:", args.action)
 
