@@ -21,6 +21,7 @@ def query_meilisearch(
             "attributesToRetrieve": ["*"],  # Get all fields for NDCG evaluation
             "showRankingScore": True,  # Include ranking scores
             "showRankingScoreDetails": True,  # Include detailed ranking info
+            # "hybrid": {"embedder": "LLAMA_JINA_PROVIDER"},
         },
     )
     return results
@@ -29,8 +30,9 @@ def query_meilisearch(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("meilisearch_config")
-    parser.add_argument("queries_file", help="CSV file with 'primary_search' and 'related' columns")
-    parser.add_argument("index_name", help="Name of the index to query")
+    parser.add_argument(
+        "queries_file", help="CSV file with 'primary_search' and 'related' columns"
+    )
     parser.add_argument(
         "output_file", help="File to store query results in JSON format"
     )
@@ -40,10 +42,19 @@ def main():
         default=20,
         help="Maximum number of results per query (default: 20)",
     )
+    parser.add_argument(
+        "--state-code",
+        help="State code to use for looking up index name in config (e.g., 'KA', 'AP')",
+    )
     args = parser.parse_args()
 
     with open(args.meilisearch_config) as f:
         config = yaml.safe_load(f)
+
+    # Determine index name - from argument, config with state code, or config global
+    index_name = config["index_config"][args.state_code]["index_name"]
+    if index_name is None:
+        parser.error("index_name must be provided in config file")
 
     client = meilisearch.Client(
         config["connection"]["URL"], config["connection"]["API_KEY"]
@@ -54,14 +65,17 @@ def main():
     df = pd.read_csv(args.queries_file, skipinitialspace=True)
     df.columns = df.columns.str.strip()
     related_map = dict(
-        zip(df["primary_search"].astype(str).str.strip(), df["related"].astype(str).str.strip())
+        zip(
+            df["primary_search"].astype(str).str.strip(),
+            df["related"].astype(str).str.strip(),
+        )
     )
 
     # Run queries and store results
     results = []
     for query in df["primary_search"].astype(str).str.strip():
         print(f"Running query: {query}")
-        query_results = query_meilisearch(query, args.index_name, client, args.limit)
+        query_results = query_meilisearch(query, index_name, client, args.limit)
 
         # Store full results including hits (actual documents) for NDCG calculation
         result_entry = {
