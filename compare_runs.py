@@ -11,6 +11,154 @@ import numpy as np
 import json
 
 
+def dcg_at_k(relevance_scores, k):
+    """
+    Calculate Discounted Cumulative Gain at rank k.
+    
+    Args:
+        relevance_scores: List of relevance scores (higher = more relevant)
+        k: Cutoff rank
+        
+    Returns:
+        DCG@k score
+    """
+    relevance_scores = relevance_scores[:k]
+    dcg = 0.0
+    for i, rel in enumerate(relevance_scores):
+        dcg += (2 ** rel - 1) / np.log2(i + 2)
+    return dcg
+
+
+def ndcg_at_k(gold_scores, system_scores, k):
+    """
+    Calculate Normalized Discounted Cumulative Gain at rank k.
+    
+    Args:
+        gold_scores: List of relevance scores in gold standard order (descending)
+        system_scores: List of relevance scores in system ranking order
+        k: Cutoff rank
+        
+    Returns:
+        NDCG@k score (0.0 to 1.0)
+    """
+    # Sort gold scores in descending order for ideal DCG
+    gold_scores_sorted = sorted(gold_scores, reverse=True)
+    
+    # Calculate DCG for system
+    dcg = dcg_at_k(system_scores, k)
+    
+    # Calculate ideal DCG
+    idcg = dcg_at_k(gold_scores_sorted, k)
+    
+    if idcg == 0:
+        return 0.0
+    return dcg / idcg
+
+
+def get_ndcg_for_query(hits1, hits2, k):
+    """
+    Calculate NDCG@k for a single query, using hits1 as gold standard and hits2 as system.
+    
+    Args:
+        hits1: List of hit dicts from baseline (first) run
+        hits2: List of hit dicts from second run
+        k: Cutoff rank
+        
+    Returns:
+        NDCG@k score
+    """
+    if not hits1 or not hits2:
+        return 0.0
+    
+    # Build gold standard: map doc_id to relevance score from first run
+    # Use rankingScore if available, otherwise use position-based relevance
+    gold_relevance = {}
+    for idx, hit in enumerate(hits1):
+        doc_id = hit.get('id')
+        if doc_id:
+            rel_score = hit.get('rankingScore', len(hits1) - idx)
+            gold_relevance[doc_id] = float(rel_score)
+    
+    if not gold_relevance:
+        return 0.0
+    
+    # Get gold scores sorted by relevance (descending) for IDCG
+    gold_docs_sorted = sorted(gold_relevance.keys(), key=lambda x: gold_relevance[x], reverse=True)
+    gold_scores = [gold_relevance[doc] for doc in gold_docs_sorted]
+    
+    # Build system scores: for each position in hits2 (up to k), 
+    # get the relevance from gold standard (0 if document not in gold standard)
+    # This properly captures the position of relevant documents in the system ranking
+    system_scores = []
+    for hit in hits2[:k]:  # Only look at top k results
+        doc_id = hit.get('id')
+        if doc_id and doc_id in gold_relevance:
+            system_scores.append(gold_relevance[doc_id])
+        else:
+            system_scores.append(0.0)
+    
+    # Pad with zeros if we have fewer than k results
+    while len(system_scores) < k:
+        system_scores.append(0.0)
+    
+    # Pad gold scores to k as well
+    while len(gold_scores) < k:
+        gold_scores.append(0.0)
+    
+    return ndcg_at_k(gold_scores[:k], system_scores[:k], k)
+
+
+def calculate_ndcg_metrics(df1, df2, k_values=[1, 3, 5, 10]):
+    """
+    Calculate NDCG metrics across all common queries.
+    
+    Args:
+        df1: First dataframe (baseline/gold standard)
+        df2: Second dataframe (system to evaluate)
+        k_values: List of k values to compute NDCG@k for
+        
+    Returns:
+        Tuple of (per_query_ndcg, overall_ndcg)
+        per_query_ndcg: Dict mapping query to dict of {k: ndcg_score}
+        overall_ndcg: Dict mapping k to average NDCG@k across all queries
+    """
+    # Find common queries
+    queries1 = set(df1['query'].unique())
+    queries2 = set(df2['query'].unique())
+    common_queries = queries1 & queries2
+    
+    per_query_ndcg = {}
+    overall_ndcg = {k: [] for k in k_values}
+    
+    for query in common_queries:
+        row1 = df1[df1['query'] == query].iloc[0]
+        row2 = df2[df2['query'] == query].iloc[0]
+        
+        hits1 = parse_hits_for_display(row1.get('hits'))
+        hits2 = parse_hits_for_display(row2.get('hits'))
+        
+        if not hits1 or not hits2:
+            continue
+        
+        query_ndcg = {}
+        for k in k_values:
+            ndcg = get_ndcg_for_query(hits1, hits2, k)
+            query_ndcg[f'NDCG@{k}'] = ndcg
+            overall_ndcg[k].append(ndcg)
+        
+        per_query_ndcg[query] = query_ndcg
+    
+    # Calculate averages
+    overall_ndcg_avg = {}
+    for k in k_values:
+        if overall_ndcg[k]:
+            overall_ndcg_avg[f'NDCG@{k}'] = np.mean(overall_ndcg[k])
+        else:
+            overall_ndcg_avg[f'NDCG@{k}'] = 0.0
+    
+    return per_query_ndcg, overall_ndcg_avg
+
+
 def load_results(file_path):
     """Load results from parquet file"""
     file_path = Path(file_path)
@@ -78,7 +226,11 @@ def compare_dataframes(df1, df2, df1_name, df2_name):
         'Only in ' + df2_name: len(only_in_2),
     }
     
-    return stats1, stats2, comparison
+    # Calculate NDCG metrics (df1 is baseline/gold standard, df2 is system)
+    k_values = [1, 3, 5, 10]
+    per_query_ndcg, overall_ndcg = calculate_ndcg_metrics(df1, df2, k_values)
+    
+    return stats1, stats2, comparison, per_query_ndcg, overall_ndcg
 
 
 def main():
@@ -332,7 +484,7 @@ def main():
             df1_name = Path(file1_path).name
             df2_name = Path(file2_path).name
             
-            stats1, stats2, comparison = compare_dataframes(df1, df2, df1_name, df2_name)
+            stats1, stats2, comparison, per_query_ndcg, overall_ndcg = compare_dataframes(df1, df2, df1_name, df2_name)
             
             # Comparison overview
             st.subheader("Comparison Overview")
@@ -361,6 +513,20 @@ def main():
                     st.metric(key, value)
             
             st.markdown("---")
+            
+            # Overall NDCG metrics
+            if overall_ndcg:
+                st.subheader("NDCG Scores (Baseline vs System)")
+                st.markdown("""
+                NDCG compares the second run (system) against the first run (baseline/gold standard).
+                For each query, the baseline's rankingScore values are used as relevance judgments.
+                """)
+                st.markdown("**Overall NDCG (averaged across all common queries)**")
+                ndcg_cols = st.columns(len(overall_ndcg))
+                for idx, (k, score) in enumerate(overall_ndcg.items()):
+                    with ndcg_cols[idx]:
+                        st.metric(k, f"{score:.4f}")
+                st.markdown("---")
             
             # Column selection for hits display
             # Get all possible columns from hits in both dataframes
@@ -412,6 +578,11 @@ def main():
                     
                     row1 = df1[df1['query'] == query].iloc[0] if len(df1[df1['query'] == query]) > 0 else None
                     row2 = df2[df2['query'] == query].iloc[0] if len(df2[df2['query'] == query]) > 0 else None
+                    
+                    # Display NDCG scores for this query if available
+                    if query in per_query_ndcg:
+                        ndcg_scores = per_query_ndcg[query]
+                        st.markdown("**NDCG Scores:** " + ", ".join([f"{k}: {v:.4f}" for k, v in ndcg_scores.items()]))
                     
                     col_a, col_b = st.columns(2)
                     
