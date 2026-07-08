@@ -1,0 +1,584 @@
+"""
+Streamlit UI for viewing and comparing query results from run_queries.py
+
+Usage: streamlit run compare_runs.py
+"""
+
+import streamlit as st
+import pandas as pd
+from pathlib import Path
+import numpy as np
+import json
+
+
+def load_results(file_path):
+    """Load results from parquet file"""
+    file_path = Path(file_path)
+    
+    if file_path.suffix == '.parquet':
+        df = pd.read_parquet(file_path)
+        return df
+    else:
+        st.error(f"Unsupported file format: {file_path.suffix}. Please use parquet files.")
+        return None
+
+
+def parse_hits_for_display(hits_raw):
+    """Parse hits data from various formats into a list of dictionaries"""
+    if hits_raw is pd.NaT:
+        return None
+    
+    # Convert pandas objects or custom types
+    if hasattr(hits_raw, 'to_dict'):
+        hits_raw = hits_raw.to_dict()
+    elif hasattr(hits_raw, '__dict__'):
+        hits_raw = vars(hits_raw)
+    
+    # Try to parse as JSON string
+    if isinstance(hits_raw, str):
+        try:
+            return json.loads(hits_raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    elif isinstance(hits_raw, list):
+        return hits_raw
+    
+    return None
+
+
+def compare_dataframes(df1, df2, df1_name, df2_name):
+    """Compare two result dataframes and return comparison metrics"""
+    
+    # Basic stats
+    stats1 = {
+        'Total queries': len(df1),
+        'Avg hits per query': df1['total_hits'].mean() if 'total_hits' in df1.columns else 0,
+        'Avg processing time (ms)': df1['processing_time_ms'].mean() if 'processing_time_ms' in df1.columns else 0,
+        'Total documents retrieved': df1['total_hits'].sum() if 'total_hits' in df1.columns else 0,
+    }
+    
+    stats2 = {
+        'Total queries': len(df2),
+        'Avg hits per query': df2['total_hits'].mean() if 'total_hits' in df2.columns else 0,
+        'Avg processing time (ms)': df2['processing_time_ms'].mean() if 'processing_time_ms' in df2.columns else 0,
+        'Total documents retrieved': df2['total_hits'].sum() if 'total_hits' in df2.columns else 0,
+    }
+    
+    # Find common queries
+    queries1 = set(df1['query'].unique())
+    queries2 = set(df2['query'].unique())
+    
+    common_queries = queries1 & queries2
+    only_in_1 = queries1 - queries2
+    only_in_2 = queries2 - queries1
+    
+    comparison = {
+        'Common queries': len(common_queries),
+        'Only in ' + df1_name: len(only_in_1),
+        'Only in ' + df2_name: len(only_in_2),
+    }
+    
+    return stats1, stats2, comparison
+
+
+def main():
+    st.set_page_config(page_title="Query Results Comparator", layout="wide")
+    
+    st.title("🔍 Query Results Viewer & Comparator")
+    st.markdown("""
+    This tool allows you to view the output from `run_queries.py` (parquet files) and compare 
+    results between different runs.
+    """)
+    
+    # Sidebar for file selection
+    st.sidebar.header("File Selection")
+    
+    # Configurable source directory
+    st.sidebar.markdown("**Source Directory**")
+    source_dir = st.sidebar.text_input(
+        "Directory containing result files",
+        value="benchmark_runs",
+        key="source_dir",
+        help="Enter the directory path where result files are stored"
+    )
+    
+    # Available files
+    result_files = []
+    
+    # Look for result files in the source directory
+    source_path = Path(source_dir)
+    if source_path.exists() and source_path.is_dir():
+        result_files.extend(source_path.glob(f'*result*.parquet'))
+        result_files.extend(source_path.glob(f'*results.parquet'))
+    else:
+        st.sidebar.warning(f"Directory '{source_dir}' not found. Falling back to current directory.")
+        result_files.extend(Path('.').glob(f'*result*.parquet'))
+        result_files.extend(Path('.').glob(f'*results.parquet'))
+    
+    # Remove duplicates
+    result_files = list(set(result_files))
+    
+    # Sort by modification time (newest first)
+    result_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    
+    # File selection
+    st.sidebar.markdown("**Select files to compare**")
+    
+    # Keep full paths but display only filenames
+    available_files = [str(f) for f in result_files if f.exists()]
+    
+    def format_filename(path):
+        """Extract just the filename for display"""
+        return Path(path).name
+    
+    # Also allow manual file path entry
+    col1, col2 = st.sidebar.columns(2)
+    
+    with col1:
+        file1_option = st.selectbox(
+            "First file",
+            options=available_files,
+            format_func=format_filename,
+            key="file1_select"
+        )
+    
+    with col2:
+        file2_option = st.selectbox(
+            "Second file (optional)",
+            options=["None"] + available_files,
+            format_func=lambda x: format_filename(x) if x != "None" else "None",
+            key="file2_select"
+        )
+    
+    # Or allow custom file paths
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Or enter custom file paths**")
+    
+    custom_file1 = st.sidebar.text_input("First file path", value="", key="custom_file1")
+    custom_file2 = st.sidebar.text_input("Second file path (optional)", value="", key="custom_file2")
+    
+    # Determine which files to use
+    if custom_file1:
+        file1_path = custom_file1
+    else:
+        file1_path = file1_option if file1_option else None
+    
+    if custom_file2:
+        file2_path = custom_file2
+    else:
+        file2_path = file2_option if file2_option and file2_option != "None" else None
+    
+    # Load data
+    df1 = None
+    df2 = None
+    
+    if file1_path:
+        try:
+            df1 = load_results(file1_path)
+        except Exception as e:
+            st.error(f"Error loading {file1_path}: {e}")
+    
+    if file2_path:
+        try:
+            df2 = load_results(file2_path)
+        except Exception as e:
+            st.error(f"Error loading {file2_path}: {e}")
+    
+    # Display based on what's loaded
+    if df1 is None and df2 is None:
+        st.warning("Please select at least one file to view.")
+        return
+    
+    # Tabs for different views
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Overview", 
+        "📋 Query Results", 
+        "🔄 Comparison",
+        "🔎 Deep Dive"
+    ])
+    
+    with tab1:
+        st.header("Overview")
+        
+        if df1 is not None:
+            st.subheader(f"File: {file1_path}")
+            st.metric("Total queries", len(df1))
+            
+            cols = st.columns(4)
+            with cols[0]:
+                if 'total_hits' in df1.columns:
+                    st.metric("Avg hits/query", f"{df1['total_hits'].mean():.1f}")
+            
+            with cols[1]:
+                if 'processing_time_ms' in df1.columns:
+                    st.metric("Avg processing time", f"{df1['processing_time_ms'].mean():.1f} ms")
+            
+            with cols[2]:
+                if 'total_hits' in df1.columns:
+                    st.metric("Total hits", int(df1['total_hits'].sum()))
+            
+            with cols[3]:
+                if 'total_hits' in df1.columns:
+                    st.metric("Total documents", int(df1['total_hits'].sum()))
+            
+            # Show distribution charts
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Hits Distribution**")
+                if 'total_hits' in df1.columns:
+                    hits_dist = df1['total_hits'].value_counts().sort_index()
+                    hits_dist.index = hits_dist.index.astype(str)
+                    st.bar_chart(hits_dist)
+                else:
+                    st.warning("total_hits column not found in df1")
+            
+            with col2:
+                st.markdown("**Processing Time Distribution**")
+                if 'processing_time_ms' in df1.columns:
+                    time_bins = pd.cut(df1['processing_time_ms'], bins=10)
+                    time_dist = time_bins.value_counts().sort_index()
+                    time_dist.index = time_dist.index.astype(str)
+                    st.bar_chart(time_dist)
+        
+        if df2 is not None:
+            st.markdown("---")
+            st.subheader(f"File: {file2_path}")
+            st.metric("Total queries", len(df2))
+            
+            cols = st.columns(4)
+            with cols[0]:
+                if 'total_hits' in df2.columns:
+                    st.metric("Avg hits/query", f"{df2['total_hits'].mean():.1f}")
+            
+            with cols[1]:
+                if 'processing_time_ms' in df2.columns:
+                    st.metric("Avg processing time", f"{df2['processing_time_ms'].mean():.1f} ms")
+            
+            with cols[2]:
+                if 'total_hits' in df2.columns:
+                    st.metric("Total hits", int(df2['total_hits'].sum()))
+            
+            with cols[3]:
+                if 'total_hits' in df2.columns:
+                    st.metric("Total documents", int(df2['total_hits'].sum()))
+    
+    with tab2:
+        st.header("Query Results")
+        
+        if df1 is not None:
+            st.subheader(f"Results from: {file1_path}")
+            
+            # Display options
+            default_cols1 = ['query', 'related_terms', 'total_hits', 'processing_time_ms']
+            default_cols1 = [c for c in default_cols1 if c in df1.columns]
+            show_columns = st.multiselect(
+                "Select columns to display",
+                options=list(df1.columns),
+                default=default_cols1,
+                key="show_cols1"
+            )
+            
+            # Filter
+            search_query = st.text_input("🔍 Filter queries", key="search1")
+            
+            display_df1 = df1.copy()
+            if search_query:
+                display_df1 = display_df1[
+                    display_df1['query'].str.contains(search_query, case=False, na=False)
+                ]
+            
+            # Show data
+            st.dataframe(
+                display_df1[show_columns],
+                use_container_width=True,
+                height=400
+            )
+        
+        if df2 is not None:
+            st.markdown("---")
+            st.subheader(f"Results from: {file2_path}")
+            
+            default_cols2 = ['query', 'related_terms', 'total_hits', 'processing_time_ms']
+            default_cols2 = [c for c in default_cols2 if c in df2.columns]
+            show_columns2 = st.multiselect(
+                "Select columns to display",
+                options=list(df2.columns),
+                default=default_cols2,
+                key="show_cols2"
+            )
+            
+            search_query2 = st.text_input("🔍 Filter queries", key="search2")
+            
+            display_df2 = df2.copy()
+            if search_query2:
+                display_df2 = display_df2[
+                    display_df2['query'].str.contains(search_query2, case=False, na=False)
+                ]
+            
+            st.dataframe(
+                display_df2[show_columns2],
+                use_container_width=True,
+                height=400
+            )
+    
+    with tab3:
+        st.header("Compare Runs")
+        
+        if df1 is None or df2 is None:
+            st.warning("Please load two files to compare.")
+        else:
+            df1_name = Path(file1_path).name
+            df2_name = Path(file2_path).name
+            
+            stats1, stats2, comparison = compare_dataframes(df1, df2, df1_name, df2_name)
+            
+            # Comparison overview
+            st.subheader("Comparison Overview")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown(f"**{df1_name}**")
+                for key, value in stats1.items():
+                    if isinstance(value, float):
+                        st.metric(key, f"{value:.2f}")
+                    else:
+                        st.metric(key, value)
+            
+            with col2:
+                st.markdown(f"**{df2_name}**")
+                for key, value in stats2.items():
+                    if isinstance(value, float):
+                        st.metric(key, f"{value:.2f}")
+                    else:
+                        st.metric(key, value)
+            
+            with col3:
+                st.markdown("**Query Overlap**")
+                for key, value in comparison.items():
+                    st.metric(key, value)
+            
+            st.markdown("---")
+            
+            # Column selection for hits display
+            # Get all possible columns from hits in both dataframes
+            all_hit_columns = set()
+            if len(df1) > 0 and 'hits' in df1.columns:
+                first_hits = df1.iloc[0].get('hits', None)
+                if first_hits is not None and first_hits is not pd.NaT:
+                    hits_list = parse_hits_for_display(first_hits)
+                    if hits_list and isinstance(hits_list, list) and len(hits_list) > 0:
+                        all_hit_columns.update(hits_list[0].keys())
+            if len(df2) > 0 and 'hits' in df2.columns:
+                first_hits = df2.iloc[0].get('hits', None)
+                if first_hits is not None and first_hits is not pd.NaT:
+                    hits_list = parse_hits_for_display(first_hits)
+                    if hits_list and isinstance(hits_list, list) and len(hits_list) > 0:
+                        all_hit_columns.update(hits_list[0].keys())
+            
+            # Default to showing only __discussions
+            available_hit_columns = sorted(list(all_hit_columns))
+            default_hit_columns = ['__discussions'] if '__discussions' in available_hit_columns else (available_hit_columns[:1] if available_hit_columns else [])
+            
+            show_hit_columns = st.multiselect(
+                "Select columns to display in hits",
+                options=available_hit_columns,
+                default=default_hit_columns,
+                key="comparison_hit_cols"
+            )
+            
+            # Ensure at least one column is selected
+            if not show_hit_columns and available_hit_columns:
+                show_hit_columns = default_hit_columns
+            
+            # Query-by-query side-by-side comparison
+            queries1 = set(df1['query'].unique())
+            queries2 = set(df2['query'].unique())
+            all_queries = sorted(queries1 | queries2)
+            
+            st.subheader(f"Query Results Comparison ({len(all_queries)} queries)")
+            
+            # Always show all queries with no filtering
+            queries_to_show = all_queries
+            
+            if not queries_to_show:
+                st.warning("No queries to display.")
+            
+            for query in queries_to_show:
+                    st.markdown("---")
+                    st.markdown(f"**Query:** {query}")
+                    
+                    row1 = df1[df1['query'] == query].iloc[0] if len(df1[df1['query'] == query]) > 0 else None
+                    row2 = df2[df2['query'] == query].iloc[0] if len(df2[df2['query'] == query]) > 0 else None
+                    
+                    col_a, col_b = st.columns(2)
+                    
+                    with col_a:
+                        st.markdown(f"**{df1_name}**")
+                        if row1 is not None:
+                            # Display individual hits as rows
+                            hits_data1 = row1.get('hits', None)
+                            if hits_data1 is not None and hits_data1 is not pd.NaT:
+                                hits_list1 = parse_hits_for_display(hits_data1)
+                                if hits_list1 and isinstance(hits_list1, list) and len(hits_list1) > 0:
+                                    df_hits1 = pd.DataFrame(hits_list1)
+                                    # Filter to show only selected columns
+                                    if show_hit_columns:
+                                        display_cols = [c for c in show_hit_columns if c in df_hits1.columns]
+                                        df_hits1 = df_hits1[display_cols]
+                                    # Reorder columns
+                                    column_order = []
+                                    for col in ['id', 'rankingScore']:
+                                        if col in df_hits1.columns:
+                                            column_order.append(col)
+                                            df_hits1[col] = df_hits1[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x)
+                                    for col in df_hits1.columns:
+                                        if col not in column_order:
+                                            column_order.append(col)
+                                    df_hits1 = df_hits1[column_order]
+                                    st.dataframe(df_hits1, use_container_width=True, height=200)
+                                else:
+                                    st.caption("No hit details available")
+                        else:
+                            st.info("Query not in first file")
+                    
+                    with col_b:
+                        st.markdown(f"**{df2_name}**")
+                        if row2 is not None:
+                            # Display individual hits as rows
+                            hits_data2 = row2.get('hits', None)
+                            if hits_data2 is not None and hits_data2 is not pd.NaT:
+                                hits_list2 = parse_hits_for_display(hits_data2)
+                                if hits_list2 and isinstance(hits_list2, list) and len(hits_list2) > 0:
+                                    df_hits2 = pd.DataFrame(hits_list2)
+                                    # Filter to show only selected columns
+                                    if show_hit_columns:
+                                        display_cols = [c for c in show_hit_columns if c in df_hits2.columns]
+                                        df_hits2 = df_hits2[display_cols]
+                                    # Reorder columns
+                                    column_order = []
+                                    for col in ['id', 'rankingScore']:
+                                        if col in df_hits2.columns:
+                                            column_order.append(col)
+                                            df_hits2[col] = df_hits2[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x)
+                                    for col in df_hits2.columns:
+                                        if col not in column_order:
+                                            column_order.append(col)
+                                    df_hits2 = df_hits2[column_order]
+                                    st.dataframe(df_hits2, use_container_width=True, height=200)
+                                else:
+                                    st.caption("No hit details available")
+                        else:
+                            st.info("Query not in second file")
+    
+    with tab4:
+        st.header("Deep Dive - Hit Details")
+        
+        if df1 is None:
+            st.warning("Please load at least one file.")
+        else:
+            # Query selection
+            selected_query = st.selectbox(
+                "Select a query to view detailed hit information",
+                options=df1['query'].unique(),
+                key="deep_query"
+            )
+            
+            # Get the row
+            row = df1[df1['query'] == selected_query].iloc[0]
+            
+            st.subheader(f"Query: {selected_query}")
+            
+            # Show query metadata
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                proc_time = row.get('processing_time_ms', 'N/A')
+                st.metric("Processing Time", f"{proc_time} ms" if isinstance(proc_time, (int, float, str)) else "N/A")
+            with col2:
+                total_hits = row.get('total_hits', 'N/A')
+                st.metric("Total Hits", total_hits if isinstance(total_hits, (int, float, str)) else "N/A")
+            with col3:
+                hits_count = row.get('total_hits', 'N/A')
+                st.metric("Hits Retrieved", hits_count if isinstance(hits_count, (int, float, str)) else "N/A")
+            
+            # Show related terms
+            related = row.get('related_terms', '')
+            if related:
+                st.markdown(f"**Related Terms:** {related}")
+            
+            # Show hits info from parquet
+            st.markdown("---")
+            st.subheader("Hit Details")
+            
+            # Display the hits data
+            hits_data = row.get('hits', None)
+            if hits_data is not None and hits_data is not pd.NaT:
+                hits_list = parse_hits_for_display(hits_data)
+                
+                if hits_list and isinstance(hits_list, list) and len(hits_list) > 0:
+                    # Convert list of hits to DataFrame for tabular display
+                    hits_df = pd.DataFrame(hits_list)
+                    
+                    # Reorder columns to put useful ones first
+                    column_order = []
+                    for col in ['id', 'rankingScore', 'rankingScoreDetails']:
+                        if col in hits_df.columns:
+                            column_order.append(col)
+                            hits_df[col] = hits_df[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x)
+                    
+                    # Add remaining columns
+                    for col in hits_df.columns:
+                        if col not in column_order:
+                            column_order.append(col)
+                    
+                    hits_df = hits_df[column_order]
+                    
+                    # Display as table
+                    st.dataframe(
+                        hits_df,
+                        use_container_width=True,
+                        height=400
+                    )
+                    
+                    # Also show raw JSON option
+                    with st.expander("Show raw JSON"):
+                        st.json(hits_list)
+                else:
+                    # Fallback to JSON display
+                    st.json(hits_data if hits_data else {})
+            else:
+                st.info("No hit details available for this query.")
+            
+            # If we have two files, show comparison for this query
+            if df2 is not None:
+                st.markdown("---")
+                st.subheader(f"Comparison with {file2_path}")
+                
+                row2 = df2[df2['query'] == selected_query]
+                
+                if len(row2) > 0:
+                    row2 = row2.iloc[0]
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"**{df1_name}**")
+                        hits1 = row.get('total_hits', 'N/A')
+                        proc1 = row.get('processing_time_ms', 'N/A')
+                        st.metric("Hits", hits1 if isinstance(hits1, (int, float, str)) else "N/A")
+                        st.metric("Processing Time", f"{proc1} ms" if isinstance(proc1, (int, float, str)) else "N/A")
+                    
+                    with col2:
+                        st.markdown(f"**{df2_name}**")
+                        hits2 = row2.get('total_hits', 'N/A')
+                        proc2 = row2.get('processing_time_ms', 'N/A')
+                        st.metric("Hits", hits2 if isinstance(hits2, (int, float, str)) else "N/A")
+                        st.metric("Processing Time", f"{proc2} ms" if isinstance(proc2, (int, float, str)) else "N/A")
+                else:
+                    st.info(f"Query '{selected_query}' not found in {file2_path}")
+
+
+if __name__ == "__main__":
+    main()
