@@ -4,10 +4,12 @@ Script to run a sequence of queries on an index, and store the results
 The results can then be used for comparison
 """
 
-import meilisearch
-import yaml
 import argparse
+import json
+
+import meilisearch
 import pandas as pd
+import yaml
 
 
 def query_meilisearch(
@@ -81,7 +83,7 @@ def main():
         result_entry = {
             "query": query,
             "related_terms": related_map.get(query, ""),
-            "hits": query_results.get("hits", []),
+            "hits": json.dumps(query_results.get("hits", [])),
             "processing_time_ms": query_results.get("processingTimeMs"),
             "total_hits": query_results.get("estimatedTotalHits", 0),
             "limit": query_results.get("limit"),
@@ -89,12 +91,8 @@ def main():
         }
         results.append(result_entry)
 
-    # Save results to output file
-    import json
-
-    with open(args.output_file, "w") as f:
-        json.dump(results, f, indent=2)
-
+    results_df = pd.DataFrame(results)
+    results_df.to_parquet(args.output_file)
     print(f"Results saved to {args.output_file}")
     print(f"Processed {len(results)} queries")
 
