@@ -144,9 +144,11 @@ def create_collections(
                 and "minWordSizeForTypos"
                 in meilisearch_config["index_config"]["global"]
             ):
-                typo_config = meilisearch_config["index_config"]["global"][
-                    "minWordSizeForTypos"
-                ]
+                typo_config = {
+                    "minWordSizeForTypos": meilisearch_config["index_config"]["global"][
+                        "minWordSizeForTypos"
+                    ]
+                }
                 collection.update_typo_tolerance(typo_config)
 
             print(f"Created/updated collection: {collection_name}")
