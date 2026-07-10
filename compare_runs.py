@@ -194,7 +194,41 @@ def parse_hits_for_display(hits_raw):
     return None
 
 
-def compare_dataframes(df1, df2, df1_name, df2_name):
+def load_metadata(file_path):
+    """Load metadata from sidecar JSON file"""
+    metadata_path = Path(file_path) if isinstance(file_path, str) else file_path
+    metadata_file = metadata_path.with_suffix(metadata_path.suffix + '.metadata.json')
+    
+    # Also try replacing .parquet with .metadata.json
+    if not metadata_file.exists():
+        if str(metadata_file).endswith('.parquet.metadata.json'):
+            metadata_file = metadata_path.parent / (metadata_path.stem + '.metadata.json')
+    
+    if metadata_file.exists():
+        try:
+            with open(metadata_file, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return None
+
+
+def parse_metadata(metadata_json):
+    """Parse metadata from JSON string (for backwards compatibility)"""
+    if metadata_json is None or pd.isna(metadata_json):
+        return {}
+    try:
+        if isinstance(metadata_json, str):
+            return json.loads(metadata_json)
+        elif isinstance(metadata_json, dict):
+            return metadata_json
+        else:
+            return {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def compare_dataframes(df1, df2, df1_name, df2_name, file1_path=None, file2_path=None):
     """Compare two result dataframes and return comparison metrics"""
     
     # Basic stats
@@ -226,11 +260,40 @@ def compare_dataframes(df1, df2, df1_name, df2_name):
         'Only in ' + df2_name: len(only_in_2),
     }
     
+    # Extract metadata for comparison context
+    metadata1 = {}
+    metadata2 = {}
+    index_metadata1 = {}
+    index_metadata2 = {}
+    
+    # Try loading from sidecar files first
+    if file1_path:
+        file_metadata = load_metadata(file1_path)
+        if file_metadata:
+            metadata1 = file_metadata.get('query_run_metadata', {})
+            index_metadata1 = file_metadata.get('index_metadata', {})
+    # Fallback to legacy columns in dataframe
+    if not metadata1 and 'query_run_metadata' in df1.columns and len(df1) > 0:
+        metadata1 = parse_metadata(df1.iloc[0].get('query_run_metadata'))
+    if not index_metadata1 and 'index_metadata' in df1.columns and len(df1) > 0:
+        index_metadata1 = parse_metadata(df1.iloc[0].get('index_metadata'))
+    
+    if file2_path:
+        file_metadata = load_metadata(file2_path)
+        if file_metadata:
+            metadata2 = file_metadata.get('query_run_metadata', {})
+            index_metadata2 = file_metadata.get('index_metadata', {})
+    # Fallback to legacy columns in dataframe
+    if not metadata2 and 'query_run_metadata' in df2.columns and len(df2) > 0:
+        metadata2 = parse_metadata(df2.iloc[0].get('query_run_metadata'))
+    if not index_metadata2 and 'index_metadata' in df2.columns and len(df2) > 0:
+        index_metadata2 = parse_metadata(df2.iloc[0].get('index_metadata'))
+    
     # Calculate NDCG metrics (df1 is baseline/gold standard, df2 is system)
     k_values = [1, 3, 5, 10]
     per_query_ndcg, overall_ndcg = calculate_ndcg_metrics(df1, df2, k_values)
     
-    return stats1, stats2, comparison, per_query_ndcg, overall_ndcg
+    return stats1, stats2, comparison, per_query_ndcg, overall_ndcg, metadata1, metadata2, index_metadata1, index_metadata2
 
 
 def main():
@@ -373,6 +436,55 @@ def main():
                 if 'total_hits' in df1.columns:
                     st.metric("Total documents", int(df1['total_hits'].sum()))
             
+            # Display query run metadata if available (from sidecar file or legacy columns)
+            run_metadata = {}
+            index_metadata = {}
+            file_metadata = load_metadata(file1_path) if file1_path else None
+            if file_metadata:
+                run_metadata = file_metadata.get('query_run_metadata', {})
+                index_metadata = file_metadata.get('index_metadata', {})
+            elif 'query_run_metadata' in df1.columns and len(df1) > 0:
+                run_metadata = parse_metadata(df1.iloc[0].get('query_run_metadata'))
+            if 'index_metadata' in df1.columns and len(df1) > 0 and not index_metadata:
+                index_metadata = parse_metadata(df1.iloc[0].get('index_metadata'))
+            
+            if run_metadata:
+                st.markdown("---")
+                st.subheader("Query Run Metadata")
+                metadata_cols = st.columns(3)
+                with metadata_cols[0]:
+                    st.text(f"Timestamp: {run_metadata.get('timestamp', 'N/A')}")
+                with metadata_cols[1]:
+                    hybrid_enabled = run_metadata.get('hybrid_search_enabled', False)
+                    st.text(f"Hybrid search: {'Yes' if hybrid_enabled else 'No'}")
+                with metadata_cols[2]:
+                    st.text(f"Limit: {run_metadata.get('limit', 'N/A')}")
+            
+            # Display index metadata if available
+            if index_metadata:
+                    st.markdown("---")
+                    st.subheader("Index Settings at Query Time")
+                    
+                    settings = index_metadata.get("settings", {})
+                    if settings:
+                        meta_cols = st.columns(3)
+                        with meta_cols[0]:
+                            ranking_rules = settings.get('ranking_rules', [])
+                            st.text(f"Ranking rules: {', '.join(ranking_rules) if ranking_rules else 'N/A'}")
+                        with meta_cols[1]:
+                            st.text(f"Searchable attrs: {len(settings.get('searchable_attributes', []))}")
+                        with meta_cols[2]:
+                            st.text(f"Filterable attrs: {len(settings.get('filterable_attributes', []))}")
+                    
+                    stats_info = index_metadata.get("stats", {})
+                    if stats_info:
+                        st.text(f"Documents in index: {stats_info.get('number_of_documents', 'N/A')}")
+                    
+                    embedders = index_metadata.get("embedders", {})
+                    if embedders:
+                        if isinstance(embedders, dict):
+                            st.text(f"Embedders: {', '.join(embedders.keys())}")
+            
             # Show distribution charts
             st.markdown("---")
             col1, col2 = st.columns(2)
@@ -415,6 +527,55 @@ def main():
             with cols[3]:
                 if 'total_hits' in df2.columns:
                     st.metric("Total documents", int(df2['total_hits'].sum()))
+            
+            # Display query run metadata if available (from sidecar file or legacy columns)
+            run_metadata2 = {}
+            index_metadata2 = {}
+            file_metadata2 = load_metadata(file2_path) if file2_path else None
+            if file_metadata2:
+                run_metadata2 = file_metadata2.get('query_run_metadata', {})
+                index_metadata2 = file_metadata2.get('index_metadata', {})
+            elif 'query_run_metadata' in df2.columns and len(df2) > 0:
+                run_metadata2 = parse_metadata(df2.iloc[0].get('query_run_metadata'))
+            if 'index_metadata' in df2.columns and len(df2) > 0 and not index_metadata2:
+                index_metadata2 = parse_metadata(df2.iloc[0].get('index_metadata'))
+            
+            if run_metadata2:
+                st.markdown("---")
+                st.subheader("Query Run Metadata")
+                metadata_cols = st.columns(3)
+                with metadata_cols[0]:
+                    st.text(f"Timestamp: {run_metadata2.get('timestamp', 'N/A')}")
+                with metadata_cols[1]:
+                    hybrid_enabled = run_metadata2.get('hybrid_search_enabled', False)
+                    st.text(f"Hybrid search: {'Yes' if hybrid_enabled else 'No'}")
+                with metadata_cols[2]:
+                    st.text(f"Limit: {run_metadata2.get('limit', 'N/A')}")
+            
+            # Display index metadata if available
+            if index_metadata2:
+                st.markdown("---")
+                st.subheader("Index Settings at Query Time")
+                
+                settings = index_metadata2.get("settings", {})
+                if settings:
+                    meta_cols = st.columns(3)
+                    with meta_cols[0]:
+                        ranking_rules = settings.get('ranking_rules', [])
+                        st.text(f"Ranking rules: {', '.join(ranking_rules) if ranking_rules else 'N/A'}")
+                    with meta_cols[1]:
+                        st.text(f"Searchable attrs: {len(settings.get('searchable_attributes', []))}")
+                    with meta_cols[2]:
+                        st.text(f"Filterable attrs: {len(settings.get('filterable_attributes', []))}")
+                
+                stats_info = index_metadata2.get("stats", {})
+                if stats_info:
+                    st.text(f"Documents in index: {stats_info.get('number_of_documents', 'N/A')}")
+                
+                embedders = index_metadata2.get("embedders", {})
+                if embedders:
+                    if isinstance(embedders, dict):
+                        st.text(f"Embedders: {', '.join(embedders.keys())}")
     
     with tab2:
         st.header("Query Results")
@@ -484,7 +645,7 @@ def main():
             df1_name = Path(file1_path).name
             df2_name = Path(file2_path).name
             
-            stats1, stats2, comparison, per_query_ndcg, overall_ndcg = compare_dataframes(df1, df2, df1_name, df2_name)
+            stats1, stats2, comparison, per_query_ndcg, overall_ndcg, metadata1, metadata2, index_metadata1, index_metadata2 = compare_dataframes(df1, df2, df1_name, df2_name, file1_path, file2_path)
             
             # Comparison overview
             st.subheader("Comparison Overview")
@@ -511,6 +672,91 @@ def main():
                 st.markdown("**Query Overlap**")
                 for key, value in comparison.items():
                     st.metric(key, value)
+            
+            # Display metadata comparison if available
+            st.markdown("---")
+            
+            # Show query run metadata comparison
+            if metadata1 or metadata2:
+                st.subheader("Query Run Metadata")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if metadata1:
+                        st.markdown(f"**{df1_name}**")
+                        for key, value in metadata1.items():
+                            st.text(f"{key}: {value}")
+                    else:
+                        st.info("No query run metadata available")
+                
+                with col2:
+                    if metadata2:
+                        st.markdown(f"**{df2_name}**")
+                        for key, value in metadata2.items():
+                            st.text(f"{key}: {value}")
+                    else:
+                        st.info("No query run metadata available")
+            
+            # Show index settings comparison
+            if index_metadata1 or index_metadata2:
+                st.markdown("---")
+                st.subheader("Index Settings Comparison")
+                
+                # Display key settings side by side
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if index_metadata1:
+                        st.markdown(f"**{df1_name}**")
+                        settings1 = index_metadata1.get("settings", {})
+                        if settings1:
+                            st.text(f"Ranking rules: {', '.join(settings1.get('ranking_rules', []))}")
+                            st.text(f"Searchable attributes: {len(settings1.get('searchable_attributes', []))}")
+                            st.text(f"Filterable attributes: {len(settings1.get('filterable_attributes', []))}")
+                        
+                        stats1_info = index_metadata1.get("stats", {})
+                        if stats1_info:
+                            st.text(f"Documents in index: {stats1_info.get('number_of_documents', 'N/A')}")
+                        
+                        embedders1 = index_metadata1.get("embedders", {})
+                        if embedders1:
+                            st.text(f"Embedders configured: {list(embedders1.keys()) if isinstance(embedders1, dict) else 'N/A'}")
+                    else:
+                        st.info("No index metadata available")
+                
+                with col2:
+                    if index_metadata2:
+                        st.markdown(f"**{df2_name}**")
+                        settings2 = index_metadata2.get("settings", {})
+                        if settings2:
+                            st.text(f"Ranking rules: {', '.join(settings2.get('ranking_rules', []))}")
+                            st.text(f"Searchable attributes: {len(settings2.get('searchable_attributes', []))}")
+                            st.text(f"Filterable attributes: {len(settings2.get('filterable_attributes', []))}")
+                        
+                        stats2_info = index_metadata2.get("stats", {})
+                        if stats2_info:
+                            st.text(f"Documents in index: {stats2_info.get('number_of_documents', 'N/A')}")
+                        
+                        embedders2 = index_metadata2.get("embedders", {})
+                        if embedders2:
+                            st.text(f"Embedders configured: {list(embedders2.keys()) if isinstance(embedders2, dict) else 'N/A'}")
+                    else:
+                        st.info("No index metadata available")
+                
+                # Show detailed index settings in expander
+                with st.expander("View full index settings JSON"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if index_metadata1:
+                            st.json(index_metadata1)
+                        else:
+                            st.text("No metadata available")
+                    with col2:
+                        if index_metadata2:
+                            st.json(index_metadata2)
+                        else:
+                            st.text("No metadata available")
             
             st.markdown("---")
             
