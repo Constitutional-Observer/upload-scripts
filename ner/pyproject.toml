@@ -1,0 +1,22 @@
+[project]
+name = "constitutional-observer-ner"
+version = "0.1.0"
+description = "Populate a _ner field on Meilisearch documents using IndicNER"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "meilisearch>=0.40.0",
+    "tqdm>=4.67.1",
+    "transformers>=4.44.0",
+    "torch>=2.2.0",
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
