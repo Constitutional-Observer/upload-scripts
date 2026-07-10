@@ -405,243 +405,17 @@ def main():
         return
     
     # Tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Overview", 
-        "📋 Query Results", 
-        "🔄 Comparison",
-        "🔎 Deep Dive"
+    tab_settings, tab_compare = st.tabs([
+        "Settings",
+        "Compare Results"
     ])
     
-    with tab1:
-        st.header("Overview")
+    with tab_settings:
+        st.header("Settings")
         
-        if df1 is not None:
-            st.subheader(f"File: {file1_path}")
-            st.metric("Total queries", len(df1))
-            
-            cols = st.columns(4)
-            with cols[0]:
-                if 'total_hits' in df1.columns:
-                    st.metric("Avg hits/query", f"{df1['total_hits'].mean():.1f}")
-            
-            with cols[1]:
-                if 'processing_time_ms' in df1.columns:
-                    st.metric("Avg processing time", f"{df1['processing_time_ms'].mean():.1f} ms")
-            
-            with cols[2]:
-                if 'total_hits' in df1.columns:
-                    st.metric("Total hits", int(df1['total_hits'].sum()))
-            
-            with cols[3]:
-                if 'total_hits' in df1.columns:
-                    st.metric("Total documents", int(df1['total_hits'].sum()))
-            
-            # Display query run metadata if available (from sidecar file or legacy columns)
-            run_metadata = {}
-            index_metadata = {}
-            file_metadata = load_metadata(file1_path) if file1_path else None
-            if file_metadata:
-                run_metadata = file_metadata.get('query_run_metadata', {})
-                index_metadata = file_metadata.get('index_metadata', {})
-            elif 'query_run_metadata' in df1.columns and len(df1) > 0:
-                run_metadata = parse_metadata(df1.iloc[0].get('query_run_metadata'))
-            if 'index_metadata' in df1.columns and len(df1) > 0 and not index_metadata:
-                index_metadata = parse_metadata(df1.iloc[0].get('index_metadata'))
-            
-            if run_metadata:
-                st.markdown("---")
-                st.subheader("Query Run Metadata")
-                metadata_cols = st.columns(3)
-                with metadata_cols[0]:
-                    st.text(f"Timestamp: {run_metadata.get('timestamp', 'N/A')}")
-                with metadata_cols[1]:
-                    hybrid_enabled = run_metadata.get('hybrid_search_enabled', False)
-                    st.text(f"Hybrid search: {'Yes' if hybrid_enabled else 'No'}")
-                with metadata_cols[2]:
-                    st.text(f"Limit: {run_metadata.get('limit', 'N/A')}")
-            
-            # Display index metadata if available
-            if index_metadata:
-                    st.markdown("---")
-                    st.subheader("Index Settings at Query Time")
-                    
-                    settings = index_metadata.get("settings", {})
-                    if settings:
-                        meta_cols = st.columns(3)
-                        with meta_cols[0]:
-                            ranking_rules = settings.get('ranking_rules', [])
-                            st.text(f"Ranking rules: {', '.join(ranking_rules) if ranking_rules else 'N/A'}")
-                        with meta_cols[1]:
-                            st.text(f"Searchable attrs: {len(settings.get('searchable_attributes', []))}")
-                        with meta_cols[2]:
-                            st.text(f"Filterable attrs: {len(settings.get('filterable_attributes', []))}")
-                    
-                    stats_info = index_metadata.get("stats", {})
-                    if stats_info:
-                        st.text(f"Documents in index: {stats_info.get('number_of_documents', 'N/A')}")
-                    
-                    embedders = index_metadata.get("embedders", {})
-                    if embedders:
-                        if isinstance(embedders, dict):
-                            st.text(f"Embedders: {', '.join(embedders.keys())}")
-            
-            # Show distribution charts
-            st.markdown("---")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Hits Distribution**")
-                if 'total_hits' in df1.columns:
-                    hits_dist = df1['total_hits'].value_counts().sort_index()
-                    hits_dist.index = hits_dist.index.astype(str)
-                    st.bar_chart(hits_dist)
-                else:
-                    st.warning("total_hits column not found in df1")
-            
-            with col2:
-                st.markdown("**Processing Time Distribution**")
-                if 'processing_time_ms' in df1.columns:
-                    time_bins = pd.cut(df1['processing_time_ms'], bins=10)
-                    time_dist = time_bins.value_counts().sort_index()
-                    time_dist.index = time_dist.index.astype(str)
-                    st.bar_chart(time_dist)
-        
-        if df2 is not None:
-            st.markdown("---")
-            st.subheader(f"File: {file2_path}")
-            st.metric("Total queries", len(df2))
-            
-            cols = st.columns(4)
-            with cols[0]:
-                if 'total_hits' in df2.columns:
-                    st.metric("Avg hits/query", f"{df2['total_hits'].mean():.1f}")
-            
-            with cols[1]:
-                if 'processing_time_ms' in df2.columns:
-                    st.metric("Avg processing time", f"{df2['processing_time_ms'].mean():.1f} ms")
-            
-            with cols[2]:
-                if 'total_hits' in df2.columns:
-                    st.metric("Total hits", int(df2['total_hits'].sum()))
-            
-            with cols[3]:
-                if 'total_hits' in df2.columns:
-                    st.metric("Total documents", int(df2['total_hits'].sum()))
-            
-            # Display query run metadata if available (from sidecar file or legacy columns)
-            run_metadata2 = {}
-            index_metadata2 = {}
-            file_metadata2 = load_metadata(file2_path) if file2_path else None
-            if file_metadata2:
-                run_metadata2 = file_metadata2.get('query_run_metadata', {})
-                index_metadata2 = file_metadata2.get('index_metadata', {})
-            elif 'query_run_metadata' in df2.columns and len(df2) > 0:
-                run_metadata2 = parse_metadata(df2.iloc[0].get('query_run_metadata'))
-            if 'index_metadata' in df2.columns and len(df2) > 0 and not index_metadata2:
-                index_metadata2 = parse_metadata(df2.iloc[0].get('index_metadata'))
-            
-            if run_metadata2:
-                st.markdown("---")
-                st.subheader("Query Run Metadata")
-                metadata_cols = st.columns(3)
-                with metadata_cols[0]:
-                    st.text(f"Timestamp: {run_metadata2.get('timestamp', 'N/A')}")
-                with metadata_cols[1]:
-                    hybrid_enabled = run_metadata2.get('hybrid_search_enabled', False)
-                    st.text(f"Hybrid search: {'Yes' if hybrid_enabled else 'No'}")
-                with metadata_cols[2]:
-                    st.text(f"Limit: {run_metadata2.get('limit', 'N/A')}")
-            
-            # Display index metadata if available
-            if index_metadata2:
-                st.markdown("---")
-                st.subheader("Index Settings at Query Time")
-                
-                settings = index_metadata2.get("settings", {})
-                if settings:
-                    meta_cols = st.columns(3)
-                    with meta_cols[0]:
-                        ranking_rules = settings.get('ranking_rules', [])
-                        st.text(f"Ranking rules: {', '.join(ranking_rules) if ranking_rules else 'N/A'}")
-                    with meta_cols[1]:
-                        st.text(f"Searchable attrs: {len(settings.get('searchable_attributes', []))}")
-                    with meta_cols[2]:
-                        st.text(f"Filterable attrs: {len(settings.get('filterable_attributes', []))}")
-                
-                stats_info = index_metadata2.get("stats", {})
-                if stats_info:
-                    st.text(f"Documents in index: {stats_info.get('number_of_documents', 'N/A')}")
-                
-                embedders = index_metadata2.get("embedders", {})
-                if embedders:
-                    if isinstance(embedders, dict):
-                        st.text(f"Embedders: {', '.join(embedders.keys())}")
-    
-    with tab2:
-        st.header("Query Results")
-        
-        if df1 is not None:
-            st.subheader(f"Results from: {file1_path}")
-            
-            # Display options
-            default_cols1 = ['query', 'related_terms', 'total_hits', 'processing_time_ms']
-            default_cols1 = [c for c in default_cols1 if c in df1.columns]
-            show_columns = st.multiselect(
-                "Select columns to display",
-                options=list(df1.columns),
-                default=default_cols1,
-                key="show_cols1"
-            )
-            
-            # Filter
-            search_query = st.text_input("🔍 Filter queries", key="search1")
-            
-            display_df1 = df1.copy()
-            if search_query:
-                display_df1 = display_df1[
-                    display_df1['query'].str.contains(search_query, case=False, na=False)
-                ]
-            
-            # Show data
-            st.dataframe(
-                display_df1[show_columns],
-                use_container_width=True,
-                height=400
-            )
-        
-        if df2 is not None:
-            st.markdown("---")
-            st.subheader(f"Results from: {file2_path}")
-            
-            default_cols2 = ['query', 'related_terms', 'total_hits', 'processing_time_ms']
-            default_cols2 = [c for c in default_cols2 if c in df2.columns]
-            show_columns2 = st.multiselect(
-                "Select columns to display",
-                options=list(df2.columns),
-                default=default_cols2,
-                key="show_cols2"
-            )
-            
-            search_query2 = st.text_input("🔍 Filter queries", key="search2")
-            
-            display_df2 = df2.copy()
-            if search_query2:
-                display_df2 = display_df2[
-                    display_df2['query'].str.contains(search_query2, case=False, na=False)
-                ]
-            
-            st.dataframe(
-                display_df2[show_columns2],
-                use_container_width=True,
-                height=400
-            )
-    
-    with tab3:
-        st.header("Compare Runs")
-        
-        if df1 is None or df2 is None:
-            st.warning("Please load two files to compare.")
-        else:
+        # Handle both single and dual file scenarios
+        if df1 is not None and df2 is not None:
+            # Two files: show comparison/differences
             df1_name = Path(file1_path).name
             df2_name = Path(file2_path).name
             
@@ -673,12 +447,10 @@ def main():
                 for key, value in comparison.items():
                     st.metric(key, value)
             
-            # Display metadata comparison if available
-            st.markdown("---")
-            
             # Show query run metadata comparison
             if metadata1 or metadata2:
-                st.subheader("Query Run Metadata")
+                st.markdown("---")
+                st.subheader("Query Run Metadata Comparison")
                 
                 col1, col2 = st.columns(2)
                 
@@ -757,8 +529,131 @@ def main():
                             st.json(index_metadata2)
                         else:
                             st.text("No metadata available")
+        
+        elif df1 is not None:
+            # Single file: show its metadata and index settings
+            st.subheader(f"File: {file1_path}")
             
-            st.markdown("---")
+            # Display query run metadata if available
+            run_metadata = {}
+            index_metadata = {}
+            file_metadata = load_metadata(file1_path) if file1_path else None
+            if file_metadata:
+                run_metadata = file_metadata.get('query_run_metadata', {})
+                index_metadata = file_metadata.get('index_metadata', {})
+            elif 'query_run_metadata' in df1.columns and len(df1) > 0:
+                run_metadata = parse_metadata(df1.iloc[0].get('query_run_metadata'))
+            if 'index_metadata' in df1.columns and len(df1) > 0 and not index_metadata:
+                index_metadata = parse_metadata(df1.iloc[0].get('index_metadata'))
+            
+            if run_metadata:
+                st.markdown("---")
+                st.subheader("Query Run Metadata")
+                metadata_cols = st.columns(3)
+                with metadata_cols[0]:
+                    st.text(f"Timestamp: {run_metadata.get('timestamp', 'N/A')}")
+                with metadata_cols[1]:
+                    hybrid_enabled = run_metadata.get('hybrid_search_enabled', False)
+                    st.text(f"Hybrid search: {'Yes' if hybrid_enabled else 'No'}")
+                with metadata_cols[2]:
+                    st.text(f"Limit: {run_metadata.get('limit', 'N/A')}")
+            
+            # Display index metadata if available
+            if index_metadata:
+                st.markdown("---")
+                st.subheader("Index Settings at Query Time")
+                
+                settings = index_metadata.get("settings", {})
+                if settings:
+                    meta_cols = st.columns(3)
+                    with meta_cols[0]:
+                        ranking_rules = settings.get('ranking_rules', [])
+                        st.text(f"Ranking rules: {', '.join(ranking_rules) if ranking_rules else 'N/A'}")
+                    with meta_cols[1]:
+                        st.text(f"Searchable attrs: {len(settings.get('searchable_attributes', []))}")
+                    with meta_cols[2]:
+                        st.text(f"Filterable attrs: {len(settings.get('filterable_attributes', []))}")
+                
+                stats_info = index_metadata.get("stats", {})
+                if stats_info:
+                    st.text(f"Documents in index: {stats_info.get('number_of_documents', 'N/A')}")
+                
+                embedders = index_metadata.get("embedders", {})
+                if embedders:
+                    if isinstance(embedders, dict):
+                        st.text(f"Embedders: {', '.join(embedders.keys())}")
+                
+                # Show full JSON
+                with st.expander("View full index settings JSON"):
+                    st.json(index_metadata)
+        
+        elif df2 is not None:
+            # Single file (df2 only): show its metadata and index settings
+            st.subheader(f"File: {file2_path}")
+            
+            # Display query run metadata if available
+            run_metadata2 = {}
+            index_metadata2 = {}
+            file_metadata2 = load_metadata(file2_path) if file2_path else None
+            if file_metadata2:
+                run_metadata2 = file_metadata2.get('query_run_metadata', {})
+                index_metadata2 = file_metadata2.get('index_metadata', {})
+            elif 'query_run_metadata' in df2.columns and len(df2) > 0:
+                run_metadata2 = parse_metadata(df2.iloc[0].get('query_run_metadata'))
+            if 'index_metadata' in df2.columns and len(df2) > 0 and not index_metadata2:
+                index_metadata2 = parse_metadata(df2.iloc[0].get('index_metadata'))
+            
+            if run_metadata2:
+                st.markdown("---")
+                st.subheader("Query Run Metadata")
+                metadata_cols = st.columns(3)
+                with metadata_cols[0]:
+                    st.text(f"Timestamp: {run_metadata2.get('timestamp', 'N/A')}")
+                with metadata_cols[1]:
+                    hybrid_enabled = run_metadata2.get('hybrid_search_enabled', False)
+                    st.text(f"Hybrid search: {'Yes' if hybrid_enabled else 'No'}")
+                with metadata_cols[2]:
+                    st.text(f"Limit: {run_metadata2.get('limit', 'N/A')}")
+            
+            # Display index metadata if available
+            if index_metadata2:
+                st.markdown("---")
+                st.subheader("Index Settings at Query Time")
+                
+                settings = index_metadata2.get("settings", {})
+                if settings:
+                    meta_cols = st.columns(3)
+                    with meta_cols[0]:
+                        ranking_rules = settings.get('ranking_rules', [])
+                        st.text(f"Ranking rules: {', '.join(ranking_rules) if ranking_rules else 'N/A'}")
+                    with meta_cols[1]:
+                        st.text(f"Searchable attrs: {len(settings.get('searchable_attributes', []))}")
+                    with meta_cols[2]:
+                        st.text(f"Filterable attrs: {len(settings.get('filterable_attributes', []))}")
+                
+                stats_info = index_metadata2.get("stats", {})
+                if stats_info:
+                    st.text(f"Documents in index: {stats_info.get('number_of_documents', 'N/A')}")
+                
+                embedders = index_metadata2.get("embedders", {})
+                if embedders:
+                    if isinstance(embedders, dict):
+                        st.text(f"Embedders: {', '.join(embedders.keys())}")
+                
+                # Show full JSON
+                with st.expander("View full index settings JSON"):
+                    st.json(index_metadata2)
+    
+    with tab_compare:
+        st.header("Compare Results")
+        
+        if df1 is None or df2 is None:
+            st.warning("Please load two files to compare.")
+        else:
+            df1_name = Path(file1_path).name
+            df2_name = Path(file2_path).name
+            
+            stats1, stats2, comparison, per_query_ndcg, overall_ndcg, metadata1, metadata2, index_metadata1, index_metadata2 = compare_dataframes(df1, df2, df1_name, df2_name, file1_path, file2_path)
             
             # Overall NDCG metrics
             if overall_ndcg:
@@ -819,182 +714,76 @@ def main():
                 st.warning("No queries to display.")
             
             for query in queries_to_show:
-                    st.markdown("---")
-                    st.markdown(f"**Query:** {query}")
-                    
-                    row1 = df1[df1['query'] == query].iloc[0] if len(df1[df1['query'] == query]) > 0 else None
-                    row2 = df2[df2['query'] == query].iloc[0] if len(df2[df2['query'] == query]) > 0 else None
-                    
-                    # Display NDCG scores for this query if available
-                    if query in per_query_ndcg:
-                        ndcg_scores = per_query_ndcg[query]
-                        st.markdown("**NDCG Scores:** " + ", ".join([f"{k}: {v:.4f}" for k, v in ndcg_scores.items()]))
-                    
-                    col_a, col_b = st.columns(2)
-                    
-                    with col_a:
-                        st.markdown(f"**{df1_name}**")
-                        if row1 is not None:
-                            # Display individual hits as rows
-                            hits_data1 = row1.get('hits', None)
-                            if hits_data1 is not None and hits_data1 is not pd.NaT:
-                                hits_list1 = parse_hits_for_display(hits_data1)
-                                if hits_list1 and isinstance(hits_list1, list) and len(hits_list1) > 0:
-                                    df_hits1 = pd.DataFrame(hits_list1)
-                                    # Filter to show only selected columns
-                                    if show_hit_columns:
-                                        display_cols = [c for c in show_hit_columns if c in df_hits1.columns]
-                                        df_hits1 = df_hits1[display_cols]
-                                    # Reorder columns
-                                    column_order = []
-                                    for col in ['id', 'rankingScore']:
-                                        if col in df_hits1.columns:
-                                            column_order.append(col)
-                                            df_hits1[col] = df_hits1[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x)
-                                    for col in df_hits1.columns:
-                                        if col not in column_order:
-                                            column_order.append(col)
-                                    df_hits1 = df_hits1[column_order]
-                                    st.dataframe(df_hits1, use_container_width=True, height=200)
-                                else:
-                                    st.caption("No hit details available")
-                        else:
-                            st.info("Query not in first file")
-                    
-                    with col_b:
-                        st.markdown(f"**{df2_name}**")
-                        if row2 is not None:
-                            # Display individual hits as rows
-                            hits_data2 = row2.get('hits', None)
-                            if hits_data2 is not None and hits_data2 is not pd.NaT:
-                                hits_list2 = parse_hits_for_display(hits_data2)
-                                if hits_list2 and isinstance(hits_list2, list) and len(hits_list2) > 0:
-                                    df_hits2 = pd.DataFrame(hits_list2)
-                                    # Filter to show only selected columns
-                                    if show_hit_columns:
-                                        display_cols = [c for c in show_hit_columns if c in df_hits2.columns]
-                                        df_hits2 = df_hits2[display_cols]
-                                    # Reorder columns
-                                    column_order = []
-                                    for col in ['id', 'rankingScore']:
-                                        if col in df_hits2.columns:
-                                            column_order.append(col)
-                                            df_hits2[col] = df_hits2[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x)
-                                    for col in df_hits2.columns:
-                                        if col not in column_order:
-                                            column_order.append(col)
-                                    df_hits2 = df_hits2[column_order]
-                                    st.dataframe(df_hits2, use_container_width=True, height=200)
-                                else:
-                                    st.caption("No hit details available")
-                        else:
-                            st.info("Query not in second file")
-    
-    with tab4:
-        st.header("Deep Dive - Hit Details")
-        
-        if df1 is None:
-            st.warning("Please load at least one file.")
-        else:
-            # Query selection
-            selected_query = st.selectbox(
-                "Select a query to view detailed hit information",
-                options=df1['query'].unique(),
-                key="deep_query"
-            )
-            
-            # Get the row
-            row = df1[df1['query'] == selected_query].iloc[0]
-            
-            st.subheader(f"Query: {selected_query}")
-            
-            # Show query metadata
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                proc_time = row.get('processing_time_ms', 'N/A')
-                st.metric("Processing Time", f"{proc_time} ms" if isinstance(proc_time, (int, float, str)) else "N/A")
-            with col2:
-                total_hits = row.get('total_hits', 'N/A')
-                st.metric("Total Hits", total_hits if isinstance(total_hits, (int, float, str)) else "N/A")
-            with col3:
-                hits_count = row.get('total_hits', 'N/A')
-                st.metric("Hits Retrieved", hits_count if isinstance(hits_count, (int, float, str)) else "N/A")
-            
-            # Show related terms
-            related = row.get('related_terms', '')
-            if related:
-                st.markdown(f"**Related Terms:** {related}")
-            
-            # Show hits info from parquet
-            st.markdown("---")
-            st.subheader("Hit Details")
-            
-            # Display the hits data
-            hits_data = row.get('hits', None)
-            if hits_data is not None and hits_data is not pd.NaT:
-                hits_list = parse_hits_for_display(hits_data)
-                
-                if hits_list and isinstance(hits_list, list) and len(hits_list) > 0:
-                    # Convert list of hits to DataFrame for tabular display
-                    hits_df = pd.DataFrame(hits_list)
-                    
-                    # Reorder columns to put useful ones first
-                    column_order = []
-                    for col in ['id', 'rankingScore', 'rankingScoreDetails']:
-                        if col in hits_df.columns:
-                            column_order.append(col)
-                            hits_df[col] = hits_df[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x)
-                    
-                    # Add remaining columns
-                    for col in hits_df.columns:
-                        if col not in column_order:
-                            column_order.append(col)
-                    
-                    hits_df = hits_df[column_order]
-                    
-                    # Display as table
-                    st.dataframe(
-                        hits_df,
-                        use_container_width=True,
-                        height=400
-                    )
-                    
-                    # Also show raw JSON option
-                    with st.expander("Show raw JSON"):
-                        st.json(hits_list)
-                else:
-                    # Fallback to JSON display
-                    st.json(hits_data if hits_data else {})
-            else:
-                st.info("No hit details available for this query.")
-            
-            # If we have two files, show comparison for this query
-            if df2 is not None:
                 st.markdown("---")
-                st.subheader(f"Comparison with {file2_path}")
+                st.markdown(f"**Query:** {query}")
                 
-                row2 = df2[df2['query'] == selected_query]
+                row1 = df1[df1['query'] == query].iloc[0] if len(df1[df1['query'] == query]) > 0 else None
+                row2 = df2[df2['query'] == query].iloc[0] if len(df2[df2['query'] == query]) > 0 else None
                 
-                if len(row2) > 0:
-                    row2 = row2.iloc[0]
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown(f"**{df1_name}**")
-                        hits1 = row.get('total_hits', 'N/A')
-                        proc1 = row.get('processing_time_ms', 'N/A')
-                        st.metric("Hits", hits1 if isinstance(hits1, (int, float, str)) else "N/A")
-                        st.metric("Processing Time", f"{proc1} ms" if isinstance(proc1, (int, float, str)) else "N/A")
-                    
-                    with col2:
-                        st.markdown(f"**{df2_name}**")
-                        hits2 = row2.get('total_hits', 'N/A')
-                        proc2 = row2.get('processing_time_ms', 'N/A')
-                        st.metric("Hits", hits2 if isinstance(hits2, (int, float, str)) else "N/A")
-                        st.metric("Processing Time", f"{proc2} ms" if isinstance(proc2, (int, float, str)) else "N/A")
-                else:
-                    st.info(f"Query '{selected_query}' not found in {file2_path}")
+                # Display NDCG scores for this query if available
+                if query in per_query_ndcg:
+                    ndcg_scores = per_query_ndcg[query]
+                    st.markdown("**NDCG Scores:** " + ", ".join([f"{k}: {v:.4f}" for k, v in ndcg_scores.items()]))
+                
+                col_a, col_b = st.columns(2)
+                
+                with col_a:
+                    st.markdown(f"**{df1_name}**")
+                    if row1 is not None:
+                        # Display individual hits as rows
+                        hits_data1 = row1.get('hits', None)
+                        if hits_data1 is not None and hits_data1 is not pd.NaT:
+                            hits_list1 = parse_hits_for_display(hits_data1)
+                            if hits_list1 and isinstance(hits_list1, list) and len(hits_list1) > 0:
+                                df_hits1 = pd.DataFrame(hits_list1)
+                                # Filter to show only selected columns
+                                if show_hit_columns:
+                                    display_cols = [c for c in show_hit_columns if c in df_hits1.columns]
+                                    df_hits1 = df_hits1[display_cols]
+                                # Reorder columns
+                                column_order = []
+                                for col in ['id', 'rankingScore']:
+                                    if col in df_hits1.columns:
+                                        column_order.append(col)
+                                        df_hits1[col] = df_hits1[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x)
+                                for col in df_hits1.columns:
+                                    if col not in column_order:
+                                        column_order.append(col)
+                                df_hits1 = df_hits1[column_order]
+                                st.dataframe(df_hits1, use_container_width=True, height=200)
+                            else:
+                                st.caption("No hit details available")
+                    else:
+                        st.info("Query not in first file")
+                
+                with col_b:
+                    st.markdown(f"**{df2_name}**")
+                    if row2 is not None:
+                        # Display individual hits as rows
+                        hits_data2 = row2.get('hits', None)
+                        if hits_data2 is not None and hits_data2 is not pd.NaT:
+                            hits_list2 = parse_hits_for_display(hits_data2)
+                            if hits_list2 and isinstance(hits_list2, list) and len(hits_list2) > 0:
+                                df_hits2 = pd.DataFrame(hits_list2)
+                                # Filter to show only selected columns
+                                if show_hit_columns:
+                                    display_cols = [c for c in show_hit_columns if c in df_hits2.columns]
+                                    df_hits2 = df_hits2[display_cols]
+                                # Reorder columns
+                                column_order = []
+                                for col in ['id', 'rankingScore']:
+                                    if col in df_hits2.columns:
+                                        column_order.append(col)
+                                        df_hits2[col] = df_hits2[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else x)
+                                for col in df_hits2.columns:
+                                    if col not in column_order:
+                                        column_order.append(col)
+                                df_hits2 = df_hits2[column_order]
+                                st.dataframe(df_hits2, use_container_width=True, height=200)
+                            else:
+                                st.caption("No hit details available")
+                    else:
+                        st.info("Query not in second file")
 
 
 if __name__ == "__main__":
