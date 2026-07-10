@@ -7,26 +7,67 @@ The results can then be used for comparison
 import argparse
 import json
 
+import httpx
 import meilisearch
 import pandas as pd
 import yaml
 
 
 def query_meilisearch(
-    query: str, index_name: str, client: meilisearch.Client, limit: int = 20
+    query: str, index_name: str, client: meilisearch.Client, limit: int = 20, hybrid_search: bool = False
 ) -> dict:
     """Run a query and return full results including documents"""
-    results = client.get_index(index_name).search(
-        query,
-        {
-            "limit": limit,
-            "attributesToRetrieve": ["*"],  # Get all fields for NDCG evaluation
-            "showRankingScore": True,  # Include ranking scores
-            "showRankingScoreDetails": True,  # Include detailed ranking info
-            # "hybrid": {"embedder": "LLAMA_JINA_PROVIDER"},
-        },
-    )
+    search_params = {
+        "limit": limit,
+        "attributesToRetrieve": ["*"],  # Get all fields for NDCG evaluation
+        "showRankingScore": True,  # Include ranking scores
+        "showRankingScoreDetails": True,  # Include detailed ranking info
+    }
+    
+    if hybrid_search:
+        search_params["hybrid"] = {"embedder": "LLAMA_JINA_PROVIDER"}
+    
+    results = client.get_index(index_name).search(query, search_params)
     return results
+
+
+def get_index_metadata(index_name: str, client: meilisearch.Client, meilisearch_url: str = None, api_key: str = None) -> dict:
+    """Get metadata about the index settings at the time of query"""
+    index = client.get_index(index_name)
+    
+    # Get the raw HTTP connection details for direct requests when needed
+    # (for embedders which has deserialization issues in the client)
+    if meilisearch_url is None or api_key is None:
+        meilisearch_url = client._http._base_url
+        api_key = client._http._headers.get('Authorization', '').replace('Bearer ', '')
+    
+    metadata = {
+        "index_name": index_name,
+        "index_uid": index.uid,
+        "primary_key": index.get_primary_key(),
+        "created_at": index.created_at,
+        "updated_at": index.updated_at,
+    }
+
+    # Get embedders info - use direct HTTP call to bypass deserialization bugs
+    index_uid = index.uid
+    settings_url = f"{meilisearch_url}/indexes/{index_uid}/settings"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    response = httpx.get(settings_url, headers=headers, timeout=30.0)
+    response.raise_for_status()
+    # Store the raw JSON response as-is
+    metadata["settings"] = response.json()
+
+    # Get stats
+    stats = index.get_stats()
+    # Convert stats to a plain dict, handling nested FieldDistribution objects
+    metadata["stats"] = {
+        "number_of_documents": getattr(stats, "number_of_documents", 0),
+        "is_indexing": getattr(stats, "is_indexing", False),
+        "field_distribution": getattr(stats, "field_distribution", {}),
+    }
+    
+    return metadata
 
 
 def main():
@@ -47,6 +88,12 @@ def main():
     parser.add_argument(
         "--state-code",
         help="State code to use for looking up index name in config (e.g., 'KA', 'AP')",
+    )
+    parser.add_argument(
+        "--hybrid",
+        action="store_true",
+        default=False,
+        help="Enable hybrid search with embeddings (default: False)",
     )
     args = parser.parse_args()
 
@@ -73,11 +120,24 @@ def main():
         )
     )
 
+    # Get index metadata once at the start (settings are consistent across all queries in a run)
+    print(f"Collecting index metadata for {index_name}...")
+    index_metadata = get_index_metadata(index_name, client, config["connection"]["URL"], config["connection"]["API_KEY"])
+    
+    # Add query run metadata
+    query_run_metadata = {
+        "hybrid_search_enabled": args.hybrid,
+        "limit": args.limit,
+        "state_code": args.state_code,
+        "timestamp": pd.Timestamp.now().isoformat(),
+        "meilisearch_url": config["connection"]["URL"],
+    }
+
     # Run queries and store results
     results = []
     for query in df["primary_search"].astype(str).str.strip():
         print(f"Running query: {query}")
-        query_results = query_meilisearch(query, index_name, client, args.limit)
+        query_results = query_meilisearch(query, index_name, client, args.limit, args.hybrid)
 
         # Store full results including hits (actual documents) for NDCG calculation
         result_entry = {
@@ -92,9 +152,20 @@ def main():
         results.append(result_entry)
 
     results_df = pd.DataFrame(results)
+    
     results_df.to_parquet(args.output_file)
     print(f"Results saved to {args.output_file}")
     print(f"Processed {len(results)} queries")
+    
+    # Save metadata to a sidecar JSON file
+    metadata_file = args.output_file + ".metadata.json"
+    combined_metadata = {
+        "index_metadata": index_metadata,
+        "query_run_metadata": query_run_metadata,
+    }
+    with open(metadata_file, 'w') as f:
+        json.dump(combined_metadata, f, indent=2, default=str)
+    print(f"Metadata saved to {metadata_file}")
 
 
 if __name__ == "__main__":
