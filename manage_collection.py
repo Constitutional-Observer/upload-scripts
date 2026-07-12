@@ -272,37 +272,28 @@ def _upload_one_document(
 
 
 def upload_documents_from_path(
-    files_path: Path | None,
+    files_path: Path,
     meilisearch_config: dict,
     state_code: str | None = None,
     limit: int | None = None,
     prefix: str = "state_legislature_debates",
+    *,
+    metadata_path: Path,
 ) -> None:
     """Upload documents from a state directory to Meilisearch
 
     Args:
-        files_path: Path to state directory containing data (optional if state_path is in config)
+        files_path: Path to state directory containing data
         meilisearch_config: Meilisearch configuration
-        state_code: State code (optional if files_path is provided)
+        state_code: State code (optional, defaults to files_path.name)
         limit: Optional limit on number of documents to process
         prefix: Prefix for the index name
+        metadata_path: Path to metadata JSONL file
     """
-    # Determine the files path and state code
-    if files_path is None:
-        # Try to get from config
-        files_path_str = meilisearch_config.get("state_path")
-        if files_path_str:
-            files_path = Path(files_path_str)
-        else:
-            raise ValueError(
-                "files_path must be provided as argument or state_path in config"
-            )
-
     if state_code is None:
         state_code = files_path.name
 
-    metadata_file = files_path / "all_metadata.json"
-    metadata = _get_metadata(metadata_file)
+    metadata = _get_metadata(metadata_path)
     client = get_client(meilisearch_config)
 
     responses = []
@@ -379,14 +370,17 @@ def main():
         help="Prefix for the index name (for upload action)",
     )
     parser.add_argument(
-        "files_path",
-        nargs="?",
-        help="Path to directory containing data all_metadata.json and downloads (required for upload action if not in config)",
+        "--files-path",
+        help="Path to directory containing data all_metadata.json and downloads (default: state_path from config)",
     )
     parser.add_argument("--index", help="index to delete")
     parser.add_argument(
         "--state-code",
         help="State code (optional, can be derived from files_path)",
+    )
+    parser.add_argument(
+        "--metadata-path",
+        help="Absolute path to metadata JSONL file (default: state_path/all_metadata.json or files_path/all_metadata.json)",
     )
 
     args = parser.parse_args()
@@ -405,10 +399,44 @@ def main():
         case "print_schema":
             print_collections_info(states, meilisearch_config)
         case "upload":
-            path = Path(args.files_path) if args.files_path else None
-            upload_documents_from_path(
-                path, meilisearch_config, args.state_code, args.limit, args.prefix
-            )
+            states_to_process = args.states
+            if not states_to_process:
+                raise ValueError("--states is required for upload action")
+
+            for state in states_to_process:
+                # Resolve files_path: --files-path arg, then index_config.{state}.files_path, then root state_path
+                if args.files_path:
+                    files_path = Path(args.files_path)
+                else:
+                    state_config = meilisearch_config["index_config"].get(state, {})
+                    files_path_str = state_config.get("files_path")
+                    if files_path_str:
+                        files_path = Path(files_path_str)
+                    else:
+                        files_path_str = meilisearch_config.get("state_path")
+                        if not files_path_str:
+                            raise ValueError(
+                                f"files_path must be provided as argument, or files_path under index_config.{state}, or state_path at config root"
+                            )
+                        files_path = Path(files_path_str)
+
+                # Resolve metadata_path: --metadata-path arg, then index_config.{state}.metadata_path, then root metadata_path, then files_path/all_metadata.json
+                if args.metadata_path:
+                    metadata_path = Path(args.metadata_path)
+                else:
+                    metadata_path_str = state_config.get("metadata_path")
+                    if metadata_path_str:
+                        metadata_path = Path(metadata_path_str)
+                    else:
+                        metadata_path_str = meilisearch_config.get("metadata_path")
+                        if metadata_path_str:
+                            metadata_path = Path(metadata_path_str)
+                        else:
+                            metadata_path = files_path / "all_metadata.json"
+
+                upload_documents_from_path(
+                    files_path, meilisearch_config, state, args.limit, args.prefix, metadata_path=metadata_path
+                )
         case _:
             print("Unexpected argument:", args.action)
 
