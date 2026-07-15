@@ -225,7 +225,7 @@ def _upload_one_document(
         return {"file": file_name, "error": str(e)}
 
     # Read discussion text
-    discussion_text_path = files_path / "downloads" / file_name
+    discussion_text_path = files_path / file_name
     if not discussion_text_path.exists():
         return {"file": file_name, "error": "File not found"}
 
