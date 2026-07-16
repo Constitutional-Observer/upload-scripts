@@ -80,15 +80,14 @@ def create_collections(
             collection.update_filterable_attributes(filterable_attributes)
             collection.update_sortable_attributes(sortable_attributes)
 
-            # Update embedders if configured
-            if (
-                "index_config" in meilisearch_config
-                and "global" in meilisearch_config["index_config"]
-                and "embeddings" in meilisearch_config["index_config"]["global"]
-            ):
-                collection.update_embedders(
-                    meilisearch_config["index_config"]["global"]["embeddings"]
-                )
+            # Update embedders if configured (state-specific first, then global)
+            index_config = meilisearch_config.get("index_config", {})
+            state_embeddings = index_config.get(state_code, {}).get("embeddings")
+            global_embeddings = index_config.get("global", {}).get("embeddings")
+            embeddings_config = state_embeddings or global_embeddings
+
+            if embeddings_config:
+                collection.update_embedders(embeddings_config)
 
             # Update typo tolerance if configured
             if (
