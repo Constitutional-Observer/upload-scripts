@@ -4,6 +4,7 @@ import argparse
 import json
 import traceback
 from pathlib import Path
+from typing import Optional
 from more_itertools import batched
 
 import meilisearch
@@ -13,7 +14,8 @@ from tqdm import tqdm
 import yaml
 
 from metadata_schema import get_metadata_schema
-from metadata_handler import normalize_metadata
+from processors import FilesystemProcessor
+from processors.base import BaseProcessor
 
 
 def get_client(meilisearch_config: dict) -> meilisearch.Client:
@@ -24,55 +26,6 @@ def get_client(meilisearch_config: dict) -> meilisearch.Client:
     # Test connection
     client.health()
     return client
-
-
-def chunk_file(file_text: str, chunk_config: dict) -> list[str]:
-    """Split file text into chunks by double newlines
-
-    Args:
-        file_text: The text to chunk
-        state_code: State code for reference
-        chunk_config: State-specific chunking config containing max_chunk_len
-    """
-    import re
-
-    MAX_CHUNK_LEN = chunk_config["max_chunk_len"]
-    current_chunk = ""
-    current_chunk_word_count = 0
-
-    # Split on double newlines, preserving empty paragraphs for now
-    raw_split_file = re.split(r"\n\n", file_text)
-    chunks = []
-
-    for raw_split in raw_split_file:
-        # Skip completely empty paragraphs (only whitespace)
-        if not raw_split.strip():
-            continue
-
-        # Count words using regex that handles all Unicode whitespace
-        # This includes regular spaces, non-breaking spaces, tabs, etc.
-        words = re.split(r"\s+", raw_split.strip())
-        raw_split_word_count = len(words)
-
-        if raw_split_word_count + current_chunk_word_count > MAX_CHUNK_LEN:
-            # Start new chunk if current one would exceed limit
-            if current_chunk:  # Only add if we have content
-                chunks.append(current_chunk)
-            current_chunk = raw_split
-            current_chunk_word_count = raw_split_word_count
-        else:
-            # Add to current chunk
-            if current_chunk:
-                current_chunk += "\n\n" + raw_split
-            else:
-                current_chunk = raw_split
-            current_chunk_word_count += raw_split_word_count
-
-    # Add final chunk if it has content
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    return chunks
 
 
 def delete_collections(index_names: list[str], meilisearch_config: dict):
@@ -180,163 +133,106 @@ def print_collections_info(states, meilisearch_config: dict):
             print(f"Could not retrieve collection {collection_name}: {e}")
 
 
-def _get_metadata(metadata_file: Path) -> list[dict]:
-    """
-    Fetch metadata JSONL file
-    """
-    if not metadata_file.exists():
-        raise FileNotFoundError(f"Metadata file not found: {metadata_file}")
-
-    with open(metadata_file) as f:
-        metadata_text = f.read()
-    metadata = list(map(json.loads, metadata_text.splitlines()))
-    return metadata
-
-
-def _find_djvu_file(files: list[dict[str, str]]) -> str | None:
-    file_name = None
-    for file in files:
-        if file["name"].endswith("_djvu.txt"):
-            file_name = file["name"]
-            break
-
-    return file_name
-
-
-def _upload_one_document(
-    item: dict,
-    state_code: str,
-    files_path: Path,
-    collection: meilisearch.index.Index,
-    chunk_config: dict,
-) -> dict:
-    # Find the DJVU text file
-    file_name = _find_djvu_file(item.get("files", []))
-
-    if not file_name:
-        metadata_error = {"item": item, "error": "DJVU file not found"}
-        return metadata_error
-
-    try:
-        # Normalize metadata
-        metadata_dict = normalize_metadata(state_code, item["metadata"])
-    except Exception as e:
-        traceback.print_exc()
-        return {"file": file_name, "error": str(e)}
-
-    # Read discussion text
-    discussion_text_path = files_path / file_name
-    if not discussion_text_path.exists():
-        return {"file": file_name, "error": "File not found"}
-
-    with open(discussion_text_path) as f:
-        discussion_text = f.read()
-
-    file_chunks = chunk_file(discussion_text, chunk_config)
-
-    # Prepare documents for Meilisearch
-    documents = []
-    for chunk_id, chunk in enumerate(file_chunks):
-        document = {
-            "id": f"{state_code}_{file_name.replace('.', '_')}_{chunk_id}",
-            "state_code": state_code,
-            "file_name": file_name,
-            "chunk_id": chunk_id,
-            "__discussions": chunk,
-            **metadata_dict,
-        }
-        documents.append(document)
-
-    # Upload documents in batches
-    try:
-        # Use larger batch size for better performance
-        batch_size = 100000
-        task_ids = []
-        counts = 0
-
-        for i, batch in enumerate(batched(documents, batch_size)):
-            task = collection.add_documents(batch, primary_key="id")
-            task_ids.append(task.task_uid)
-            counts += len(batch)
-
-        return {"success": True, "count": counts, "task_ids": task_ids}
-
-        # Wait for all tasks to complete at the end (optional)
-        # This can be commented out for even faster uploads
-        # for task_id in task_ids:
-        #     client.wait_for_task(task_id)
-
-    except Exception as e:
-        print(f"Error uploading documents: {e}")
-        return {"success": False, "error": str(e), "documents": len(documents)}
-
-
-def upload_documents_from_path(
-    files_path: Path,
-    meilisearch_config: dict,
-    state_code: str | None = None,
-    limit: int | None = None,
-    prefix: str = "state_legislature_debates",
-    *,
-    metadata_path: Path,
-) -> None:
-    """Upload documents from a state directory to Meilisearch
+def upload_from_processor(
+    processor: BaseProcessor,
+    index_name: str,
+    batch_size: int = 100000,
+    use_tqdm: bool = True,
+    limit: Optional[int] = None,
+) -> tuple[int, list[dict]]:
+    """Upload documents from a processor to Meilisearch.
 
     Args:
-        files_path: Path to state directory containing data
-        meilisearch_config: Meilisearch configuration
-        state_code: State code (optional, defaults to files_path.name)
-        limit: Optional limit on number of documents to process
-        prefix: Prefix for the index name
-        metadata_path: Path to metadata JSONL file
-    """
-    if state_code is None:
-        state_code = files_path.name
+        processor: A processor instance that yields documents
+        index_name: Name of the Meilisearch index
+        batch_size: Number of documents per batch
+        use_tqdm: Whether to show progress bar
+        limit: Maximum number of source items to process
 
-    metadata = _get_metadata(metadata_path)
-    client = get_client(meilisearch_config)
+    Returns:
+        Tuple of (total_documents_uploaded, list of response dicts)
+    """
+    client = processor.ms_client
+    collection = client.index(index_name)
 
     responses = []
-    metadata_errors = []
+    task_ids = []
+    total_count = 0
 
-    collection_name = f"{prefix}_{state_code.lower()}"
+    # Collect all documents from processor
+    all_docs = []
+    doc_iter = processor.get_documents(limit=limit)
+    if use_tqdm:
+        # For filesystem processor, we can count metadata items
+        # For now, just iterate without count
+        doc_iter = tqdm(doc_iter, desc=f"Processing {processor.state_code}")
 
-    try:
-        collection = client.get_index(collection_name)
-    except meilisearch.errors.MeilisearchApiError as e:
-        print(f"Unable to get collection: {e}")
-        return
+    for doc in doc_iter:
+        all_docs.append(doc)
 
-    metadata_to_process = metadata[:limit] if limit else metadata
+    # Upload in batches
+    for i, batch in enumerate(batched(all_docs, batch_size)):
+        batch_list = list(batch)
+        try:
+            task = collection.add_documents(batch_list, primary_key="id")
+            task_ids.append(task.task_uid)
+            total_count += len(batch_list)
+            responses.append(
+                {"success": True, "count": len(batch_list), "task_id": task.task_uid}
+            )
+        except Exception as e:
+            responses.append(
+                {"success": False, "error": str(e), "count": len(batch_list)}
+            )
 
-    chunk_config = (
-        meilisearch_config["index_config"]
-        .get(state_code, {})
-        .get(
-            "chunking",
-            meilisearch_config["index_config"]
-            .get("global", {})
-            .get("chunking", {"max_chunk_len": 200}),
-        )
+    return total_count, responses
+
+
+def resolve_files_path(
+    args_files_path: str | None,
+    state_code: str,
+    meilisearch_config: dict,
+) -> Path:
+    """Resolve the files path from args, state config, or global config."""
+    if args_files_path:
+        return Path(args_files_path)
+
+    state_config = meilisearch_config.get("index_config", {}).get(state_code, {})
+    files_path_str = state_config.get("files_path")
+    if files_path_str:
+        return Path(files_path_str)
+
+    global_path = meilisearch_config.get("state_path")
+    if global_path:
+        return Path(global_path)
+
+    raise ValueError(
+        f"files_path must be provided as argument, or files_path under index_config.{state_code}, "
+        f"or state_path at config root"
     )
 
-    for item in tqdm(metadata_to_process, desc=f"Processing {state_code} documents"):
-        results = _upload_one_document(
-            item, state_code, files_path, collection, chunk_config
-        )
-        responses.append(results)
 
-    # Save responses and errors
-    with open(f"meilisearch_upload_{state_code}.json", "w") as f:
-        json.dump(responses, f)
-    with open(f"{state_code}_metadata_errors.json", "w") as f:
-        json.dump(metadata_errors, f)
+def resolve_metadata_path(
+    args_metadata_path: str | None,
+    state_code: str,
+    meilisearch_config: dict,
+    files_path: Path,
+) -> Path:
+    """Resolve the metadata path from args, state config, or defaults."""
+    if args_metadata_path:
+        return Path(args_metadata_path)
 
-    print(f"Upload completed for {state_code}")
-    print(
-        f"Total documents processed: {sum(r['count'] for r in responses if not r.get('error'))}"
-    )
-    print(f"Metadata errors: {len(metadata_errors)}")
+    state_config = meilisearch_config.get("index_config", {}).get(state_code, {})
+    metadata_path_str = state_config.get("metadata_path")
+    if metadata_path_str:
+        return Path(metadata_path_str)
+
+    global_metadata_path = meilisearch_config.get("metadata_path")
+    if global_metadata_path:
+        return Path(global_metadata_path)
+
+    # Default to files_path/all_metadata.json
+    return files_path / "all_metadata.json"
 
 
 def main():
@@ -390,6 +286,7 @@ def main():
         meilisearch_config = yaml.safe_load(f)
 
     states = args.states
+    client = get_client(meilisearch_config)
 
     match args.action:
         case "delete":
@@ -404,39 +301,74 @@ def main():
                 raise ValueError("--states is required for upload action")
 
             for state in states_to_process:
-                # Resolve files_path: --files-path arg, then index_config.{state}.files_path, then root state_path
-                if args.files_path:
-                    files_path = Path(args.files_path)
-                else:
-                    state_config = meilisearch_config["index_config"].get(state, {})
-                    files_path_str = state_config.get("files_path")
-                    if files_path_str:
-                        files_path = Path(files_path_str)
-                    else:
-                        files_path_str = meilisearch_config.get("state_path")
-                        if not files_path_str:
-                            raise ValueError(
-                                f"files_path must be provided as argument, or files_path under index_config.{state}, or state_path at config root"
-                            )
-                        files_path = Path(files_path_str)
+                print(f"\n=== Processing state: {state} ===")
 
-                # Resolve metadata_path: --metadata-path arg, then index_config.{state}.metadata_path, then root metadata_path, then files_path/all_metadata.json
-                if args.metadata_path:
-                    metadata_path = Path(args.metadata_path)
-                else:
-                    metadata_path_str = state_config.get("metadata_path")
-                    if metadata_path_str:
-                        metadata_path = Path(metadata_path_str)
-                    else:
-                        metadata_path_str = meilisearch_config.get("metadata_path")
-                        if metadata_path_str:
-                            metadata_path = Path(metadata_path_str)
-                        else:
-                            metadata_path = files_path / "all_metadata.json"
-
-                upload_documents_from_path(
-                    files_path, meilisearch_config, state, args.limit, args.prefix, metadata_path=metadata_path
+                # Resolve paths
+                files_path = resolve_files_path(
+                    args.files_path, state, meilisearch_config
                 )
+                metadata_path = resolve_metadata_path(
+                    args.metadata_path, state, meilisearch_config, files_path
+                )
+
+                # Get processor type from config (default: filesystem)
+                state_config = meilisearch_config.get("index_config", {}).get(state, {})
+                processor_name = state_config.get("processor", "filesystem")
+
+                # Create the appropriate processor using match/case
+                match processor_name:
+                    case "filesystem":
+                        processor = FilesystemProcessor(
+                            state_code=state,
+                            config=meilisearch_config,
+                            ms_client=client,
+                            files_path=files_path,
+                            metadata_path=metadata_path,
+                        )
+                    case "lok_sabha":
+                        from processors.lok_sabha import LokSabhaProcessor
+
+                        processor = LokSabhaProcessor(
+                            state_code=state,
+                            config=meilisearch_config,
+                            ms_client=client,
+                            files_path=files_path,
+                            metadata_path=metadata_path,
+                        )
+                    case _:
+                        raise ValueError(
+                            f"Unknown processor: {processor_name}. "
+                            f"Known processors: filesystem, lok_sabha"
+                        )
+
+                # Build index name
+                collection_name = f"{args.prefix}_{state.lower()}"
+
+                # Upload documents
+                try:
+                    total_count, responses = upload_from_processor(
+                        processor, collection_name, use_tqdm=True, limit=args.limit
+                    )
+
+                    # Save responses for debugging
+                    with open(f"meilisearch_upload_{state}.json", "w") as f:
+                        json.dump(responses, f)
+
+                    # Count successful uploads
+                    success_count = sum(
+                        r["count"] for r in responses if r.get("success")
+                    )
+                    error_count = sum(1 for r in responses if not r.get("success"))
+
+                    print(f"Upload completed for {state}")
+                    print(f"  Total chunks uploaded: {total_count}")
+                    print(
+                        f"  Batch responses: {len(responses)} ({success_count} successful, {error_count} errors)"
+                    )
+
+                except Exception as e:
+                    print(f"Error processing state {state}: {e}")
+                    traceback.print_exc()
         case _:
             print("Unexpected argument:", args.action)
 
