@@ -135,7 +135,7 @@ def print_collections_info(states, meilisearch_config: dict):
 def upload_from_processor(
     processor: BaseProcessor,
     index_name: str,
-    batch_size: int = 100000,
+    batch_size: int = 1000,
     use_tqdm: bool = True,
     limit: Optional[int] = None,
 ) -> tuple[int, list[dict]]:
@@ -158,19 +158,31 @@ def upload_from_processor(
     task_ids = []
     total_count = 0
 
-    # Collect all documents from processor
-    all_docs = []
+    # Get the document iterator
     doc_iter = processor.get_documents(limit=limit)
+
+    # For FilesystemProcessor, we can get the metadata count for accurate progress
+    total_for_progress = None
+    if hasattr(processor, "_load_metadata"):
+        try:
+            metadata = processor._load_metadata()
+            if limit:
+                total_for_progress = min(limit, len(metadata))
+            else:
+                total_for_progress = len(metadata)
+        except Exception:
+            pass
+
+    # Wrap with tqdm if requested - stream directly, don't collect all docs
     if use_tqdm:
-        # For filesystem processor, we can count metadata items
-        # For now, just iterate without count
-        doc_iter = tqdm(doc_iter, desc=f"Processing {processor.state_code}")
+        doc_iter = tqdm(
+            doc_iter,
+            desc=f"Processing {processor.state_code}",
+            total=total_for_progress,
+        )
 
-    for doc in doc_iter:
-        all_docs.append(doc)
-
-    # Upload in batches
-    for i, batch in enumerate(batched(all_docs, batch_size)):
+    # Stream directly into batches - NEVER collect all docs in memory
+    for batch in batched(doc_iter, batch_size):
         batch_list = list(batch)
         try:
             task = collection.add_documents(batch_list, primary_key="id")
@@ -232,6 +244,22 @@ def resolve_metadata_path(
 
     # Default to files_path/all_metadata.json
     return files_path / "all_metadata.json"
+
+
+def get_batch_size(meilisearch_config: dict, state_code: str | None = None) -> int:
+    """Get batch size from config hierarchy: state > global > default."""
+    default_batch_size = 1000
+
+    if state_code:
+        state_config = meilisearch_config.get("index_config", {}).get(state_code, {})
+        if "batch_size" in state_config:
+            return int(state_config["batch_size"])
+
+    global_config = meilisearch_config.get("index_config", {}).get("global", {})
+    if "batch_size" in global_config:
+        return int(global_config["batch_size"])
+
+    return default_batch_size
 
 
 def main():
@@ -343,10 +371,17 @@ def main():
                 # Build index name
                 collection_name = f"{args.prefix}_{state.lower()}"
 
+                # Get batch size from config
+                batch_size = get_batch_size(meilisearch_config, state)
+
                 # Upload documents
                 try:
                     total_count, responses = upload_from_processor(
-                        processor, collection_name, use_tqdm=True, limit=args.limit
+                        processor,
+                        collection_name,
+                        batch_size=batch_size,
+                        use_tqdm=True,
+                        limit=args.limit,
                     )
 
                     # Save responses for debugging
