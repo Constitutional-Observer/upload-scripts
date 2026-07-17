@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -17,6 +18,8 @@ from metadata_schema import get_metadata_schema
 from processors import FilesystemProcessor
 from processors.base import BaseProcessor
 
+logger = logging.getLogger(__name__)
+
 
 def get_client(meilisearch_config: dict) -> meilisearch.Client:
     client = meilisearch.Client(
@@ -28,11 +31,88 @@ def get_client(meilisearch_config: dict) -> meilisearch.Client:
     return client
 
 
-def delete_collections(index_names: list[str], meilisearch_config: dict):
-    """Delete Meilisearch collections for specified states"""
-    client = get_client(meilisearch_config)
+def get_index_configs(meilisearch_config: dict, prefix: str = "state_legislature_debates") -> list[tuple[str, str, dict]]:
+    """
+    Parse index config into (index_name, state_code, settings) tuples.
+    
+    Supports two formats:
+    - New format: state with indexes variants
+        index_config:
+          KA:
+            files_path: /path/to/KA
+            indexes:
+              default: {embeddings: null}
+              test: {embeddings: {...}}
+    - Old format: single index per state (backward compatible)
+        index_config:
+          KA:
+            files_path: /path/to/KA
+    
+    Args:
+        meilisearch_config: Full config dict
+        prefix: Prefix for generated index names
+    
+    Returns:
+        List of (index_name, state_code, settings_dict) tuples
+    """
+    result = []
+    index_config = meilisearch_config.get("index_config", {})
+    
+    for state_code, state_config in index_config.items():
+        if not isinstance(state_config, dict):
+            continue
+        
+        # Check if this state has variant indexes
+        if "indexes" in state_config:
+            # New format: multiple indexes per state
+            for variant_name, variant_config in state_config["indexes"].items():
+                # Index name from variant config, or generate from variant name
+                index_name = variant_config.get(
+                    "index_name",
+                    f"{prefix}_{state_code.lower()}_{variant_name}"
+                )
+                # Merge state-level defaults with variant-specific config
+                merged_config = {**state_config, **variant_config}
+                # Remove indexes key as it's organizational, not settings
+                merged_config.pop("indexes", None)
+                merged_config.pop("index_name", None)  # index_name is metadata, not a setting
+                result.append((index_name, state_code, merged_config))
+        else:
+            # Old format: single index per state
+            index_name = state_config.get(
+                "index_name",
+                f"{prefix}_{state_code.lower()}"
+            )
+            result.append((index_name, state_code, state_config))
+    
+    return result
 
-    for index_name in index_names:
+
+def delete_collections(index_names: list[str], meilisearch_config: dict, states: list[str] = None):
+    """Delete Meilisearch collections by name or for specified states"""
+    client = get_client(meilisearch_config)
+    
+    # Build full list of indexes to delete
+    indexes_to_delete = []
+    
+    if index_names:
+        indexes_to_delete.extend(index_names)
+    
+    if states:
+        # Get all indexes for the specified states
+        all_index_configs = get_index_configs(meilisearch_config)
+        state_indexes = [name for name, sc, _ in all_index_configs if sc in states]
+        indexes_to_delete.extend(state_indexes)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_indexes = []
+    for idx in indexes_to_delete:
+        if idx not in seen:
+            seen.add(idx)
+            unique_indexes.append(idx)
+    
+    for index_name in unique_indexes:
         print(f"Deleting: {index_name}")
         confirm = input("Press y to confirm: ")
         if confirm != "y":
@@ -51,10 +131,16 @@ def create_collections(
 ):
     """Create Meilisearch collections for specified states"""
     client = get_client(meilisearch_config)
+    
+    # Get all index configs, filtered by states if specified
+    all_index_configs = get_index_configs(meilisearch_config, prefix)
+    
+    if states:
+        index_configs = [(n, sc, c) for n, sc, c in all_index_configs if sc in states]
+    else:
+        index_configs = all_index_configs
 
-    for state_code in states:
-        collection_name = f"{prefix}_{state_code.lower()}"
-
+    for index_name, state_code, config in index_configs:
         # Base searchable attributes
         searchable_attributes = []
         filterable_attributes = []
@@ -73,67 +159,63 @@ def create_collections(
 
         try:
             # Create collection
-            collection = client.index(collection_name)
+            collection = client.index(index_name)
 
             # Update collection settings
             collection.update_searchable_attributes(searchable_attributes)
             collection.update_filterable_attributes(filterable_attributes)
             collection.update_sortable_attributes(sortable_attributes)
 
-            # Update embedders if configured (state-specific first, then global)
-            index_config = meilisearch_config.get("index_config", {})
-            state_embeddings = index_config.get(state_code, {}).get("embeddings")
-            global_embeddings = index_config.get("global", {}).get("embeddings")
-            embeddings_config = state_embeddings or global_embeddings
-
+            # Update embedders if configured
+            embeddings_config = config.get("embeddings")
             if embeddings_config:
                 collection.update_embedders(embeddings_config)
 
             # Update typo tolerance if configured
-            if (
-                "index_config" in meilisearch_config
-                and "global" in meilisearch_config["index_config"]
-                and "minWordSizeForTypos"
-                in meilisearch_config["index_config"]["global"]
-            ):
-                typo_config = {
-                    "minWordSizeForTypos": meilisearch_config["index_config"]["global"][
-                        "minWordSizeForTypos"
-                    ]
-                }
+            if "minWordSizeForTypos" in config:
+                typo_config = {"minWordSizeForTypos": config["minWordSizeForTypos"]}
                 collection.update_typo_tolerance(typo_config)
 
-            print(f"Created/updated collection: {collection_name}")
+            print(f"Created/updated collection: {index_name}")
             print(f"  Searchable attributes: {searchable_attributes}")
             print(f"  Filterable attributes: {filterable_attributes}")
             print(f"  Sortable attributes: {sortable_attributes}")
         except Exception as e:
-            print(f"Could not create/update collection {collection_name}: {e}")
+            print(f"Could not create/update collection {index_name}: {e}")
 
 
-def print_collections_info(states, meilisearch_config: dict):
+def print_collections_info(states, meilisearch_config: dict, prefix: str = "state_legislature_debates"):
     """Print information about Meilisearch collections"""
     client = get_client(meilisearch_config)
+    
+    # Get all index configs, filtered by states if specified
+    all_index_configs = get_index_configs(meilisearch_config, prefix)
+    
+    if states:
+        index_configs = [(n, sc, c) for n, sc, c in all_index_configs if sc in states]
+    else:
+        index_configs = all_index_configs
 
-    for state_code in states:
-        collection_name = f"state_legislature_debates_{state_code.lower()}"
+    for index_name, state_code, config in index_configs:
         try:
-            collection = client.index(collection_name)
+            collection = client.index(index_name)
             details = collection.get_raw_info()
-            print(f"Collection: {collection_name}")
+            print(f"Collection: {index_name}")
+            print(f"  State: {state_code}")
             print(f"  Primary key: {details.get('primaryKey', 'id')}")
             print(f"  Documents: {details.get('numberOfDocuments', 0)}")
             print(f"  Searchable attributes: {details.get('searchableAttributes', [])}")
             print(f"  Filterable attributes: {details.get('filterableAttributes', [])}")
             print(f"  Sortable attributes: {details.get('sortableAttributes', [])}")
         except meilisearch.errors.MeilisearchApiError:
-            print(f"Collection {collection_name} does not exist")
+            print(f"Collection {index_name} does not exist")
         except Exception as e:
-            print(f"Could not retrieve collection {collection_name}: {e}")
+            print(f"Could not retrieve collection {index_name}: {e}")
 
 
 def upload_from_processor(
     processor: BaseProcessor,
+    client: meilisearch.Client,
     index_name: str,
     batch_size: int = 1000,
     use_tqdm: bool = True,
@@ -143,6 +225,7 @@ def upload_from_processor(
 
     Args:
         processor: A processor instance that yields documents
+        client: Meilisearch client instance
         index_name: Name of the Meilisearch index
         batch_size: Number of documents per batch
         use_tqdm: Whether to show progress bar
@@ -151,7 +234,6 @@ def upload_from_processor(
     Returns:
         Tuple of (total_documents_uploaded, list of response dicts)
     """
-    client = processor.ms_client
     collection = client.index(index_name)
 
     responses = []
@@ -170,8 +252,11 @@ def upload_from_processor(
                 total_for_progress = min(limit, len(metadata))
             else:
                 total_for_progress = len(metadata)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(
+                f"Failed to load metadata for progress tracking "
+                f"(state: {processor.state_code}): {e}"
+            )
 
     # Wrap with tqdm if requested - stream directly, don't collect all docs
     if use_tqdm:
@@ -192,6 +277,10 @@ def upload_from_processor(
                 {"success": True, "count": len(batch_list), "task_id": task.task_uid}
             )
         except Exception as e:
+            logger.error(
+                f"Failed to upload batch to {index_name} "
+                f"(state: {processor.state_code}, batch_size: {len(batch_list)}): {e}"
+            )
             responses.append(
                 {"success": False, "error": str(e), "count": len(batch_list)}
             )
@@ -203,11 +292,19 @@ def resolve_files_path(
     args_files_path: str | None,
     state_code: str,
     meilisearch_config: dict,
+    index_config: dict | None = None,
 ) -> Path:
-    """Resolve the files path from args, state config, or global config."""
+    """Resolve the files path from args, index config, state config, or global config."""
     if args_files_path:
         return Path(args_files_path)
 
+    # Check index-specific config first (for variants)
+    if index_config:
+        files_path_str = index_config.get("files_path")
+        if files_path_str:
+            return Path(files_path_str)
+
+    # Fall back to state config
     state_config = meilisearch_config.get("index_config", {}).get(state_code, {})
     files_path_str = state_config.get("files_path")
     if files_path_str:
@@ -228,11 +325,19 @@ def resolve_metadata_path(
     state_code: str,
     meilisearch_config: dict,
     files_path: Path,
+    index_config: dict | None = None,
 ) -> Path:
-    """Resolve the metadata path from args, state config, or defaults."""
+    """Resolve the metadata path from args, index config, state config, or defaults."""
     if args_metadata_path:
         return Path(args_metadata_path)
 
+    # Check index-specific config first (for variants)
+    if index_config:
+        metadata_path_str = index_config.get("metadata_path")
+        if metadata_path_str:
+            return Path(metadata_path_str)
+
+    # Fall back to state config
     state_config = meilisearch_config.get("index_config", {}).get(state_code, {})
     metadata_path_str = state_config.get("metadata_path")
     if metadata_path_str:
@@ -317,92 +422,102 @@ def main():
 
     match args.action:
         case "delete":
-            delete_collections([args.index], meilisearch_config)
+            delete_collections([args.index] if args.index else [], meilisearch_config, states)
         case "create":
             create_collections(states, meilisearch_config, args.prefix)
         case "print_schema":
-            print_collections_info(states, meilisearch_config)
+            print_collections_info(states, meilisearch_config, args.prefix)
         case "upload":
             states_to_process = args.states
             if not states_to_process:
                 raise ValueError("--states is required for upload action")
 
+            # Get all index configs
+            all_index_configs = get_index_configs(meilisearch_config, args.prefix)
+
             for state in states_to_process:
-                print(f"\n=== Processing state: {state} ===")
+                # Get all indexes for this state
+                state_index_configs = [
+                    (name, config) for name, sc, config in all_index_configs 
+                    if sc == state
+                ]
+                
+                if not state_index_configs:
+                    print(f"Warning: No index configs found for state {state}")
+                    continue
+                
+                for index_name, index_config in state_index_configs:
+                    print(f"\n=== Uploading to index: {index_name} (state: {state}) ===")
 
-                # Resolve paths
-                files_path = resolve_files_path(
-                    args.files_path, state, meilisearch_config
-                )
-                metadata_path = resolve_metadata_path(
-                    args.metadata_path, state, meilisearch_config, files_path
-                )
-
-                # Get processor type from config (default: filesystem)
-                state_config = meilisearch_config.get("index_config", {}).get(state, {})
-                processor_name = state_config.get("processor", "filesystem")
-
-                # Create the appropriate processor using match/case
-                match processor_name:
-                    case "filesystem":
-                        processor = FilesystemProcessor(
-                            state_code=state,
-                            config=meilisearch_config,
-                            ms_client=client,
-                            files_path=files_path,
-                            metadata_path=metadata_path,
-                        )
-                    case "lok_sabha":
-                        from processors.lok_sabha import LokSabhaProcessor
-
-                        processor = LokSabhaProcessor(
-                            state_code=state,
-                            config=meilisearch_config,
-                            ms_client=client,
-                            files_path=files_path,
-                            metadata_path=metadata_path,
-                        )
-                    case _:
-                        raise ValueError(
-                            f"Unknown processor: {processor_name}. "
-                            f"Known processors: filesystem, lok_sabha"
-                        )
-
-                # Build index name
-                collection_name = f"{args.prefix}_{state.lower()}"
-
-                # Get batch size from config
-                batch_size = get_batch_size(meilisearch_config, state)
-
-                # Upload documents
-                try:
-                    total_count, responses = upload_from_processor(
-                        processor,
-                        collection_name,
-                        batch_size=batch_size,
-                        use_tqdm=True,
-                        limit=args.limit,
+                    # Resolve paths from index config (falling back to state config)
+                    files_path = resolve_files_path(
+                        args.files_path, state, meilisearch_config, index_config
+                    )
+                    metadata_path = resolve_metadata_path(
+                        args.metadata_path, state, meilisearch_config, files_path, index_config
                     )
 
-                    # Save responses for debugging
-                    with open(f"meilisearch_upload_{state}.json", "w") as f:
-                        json.dump(responses, f)
+                    # Get processor type from config (default: filesystem)
+                    processor_name = index_config.get("processor", "filesystem")
 
-                    # Count successful uploads
-                    success_count = sum(
-                        r["count"] for r in responses if r.get("success")
-                    )
-                    error_count = sum(1 for r in responses if not r.get("success"))
+                    # Create the appropriate processor using match/case
+                    match processor_name:
+                        case "filesystem":
+                            processor = FilesystemProcessor(
+                                state_code=state,
+                                config=meilisearch_config,
+                                files_path=files_path,
+                                metadata_path=metadata_path,
+                            )
+                        case "lok_sabha":
+                            from processors.lok_sabha import LokSabhaProcessor
 
-                    print(f"Upload completed for {state}")
-                    print(f"  Total chunks uploaded: {total_count}")
-                    print(
-                        f"  Batch responses: {len(responses)} ({success_count} successful, {error_count} errors)"
-                    )
+                            processor = LokSabhaProcessor(
+                                state_code=state,
+                                config=meilisearch_config,
+                                files_path=files_path,
+                                metadata_path=metadata_path,
+                            )
+                        case _:
+                            raise ValueError(
+                                f"Unknown processor: {processor_name}. "
+                                f"Known processors: filesystem, lok_sabha"
+                            )
 
-                except Exception as e:
-                    print(f"Error processing state {state}: {e}")
-                    traceback.print_exc()
+                    # Get batch size from config
+                    batch_size = index_config.get("batch_size", 
+                        meilisearch_config.get("index_config", {}).get("global", {}).get("batch_size", 1000))
+
+                    # Upload documents
+                    try:
+                        total_count, responses = upload_from_processor(
+                            processor,
+                            client,
+                            index_name,
+                            batch_size=batch_size,
+                            use_tqdm=True,
+                            limit=args.limit,
+                        )
+
+                        # Save responses for debugging
+                        with open(f"meilisearch_upload_{state}_{index_name.replace(args.prefix + '_', '')}.json", "w") as f:
+                            json.dump(responses, f)
+
+                        # Count successful uploads
+                        success_count = sum(
+                            r["count"] for r in responses if r.get("success")
+                        )
+                        error_count = sum(1 for r in responses if not r.get("success"))
+
+                        print(f"Upload completed for {index_name}")
+                        print(f"  Total chunks uploaded: {total_count}")
+                        print(
+                            f"  Batch responses: {len(responses)} ({success_count} successful, {error_count} errors)"
+                        )
+
+                    except Exception as e:
+                        print(f"Error processing index {index_name}: {e}")
+                        traceback.print_exc()
         case _:
             print("Unexpected argument:", args.action)
 
