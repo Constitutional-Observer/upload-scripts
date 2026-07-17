@@ -3,8 +3,6 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Iterator
 
-import meilisearch
-
 
 class BaseProcessor(ABC):
     """Abstract base class for state-specific document processors.
@@ -26,17 +24,15 @@ class BaseProcessor(ABC):
     }
     """
 
-    def __init__(self, state_code: str, config: dict, ms_client: meilisearch.Client):
+    def __init__(self, state_code: str, config: dict):
         """Initialize the processor.
 
         Args:
             state_code: Two-letter state code (e.g., "AP", "LS")
             config: Full configuration dictionary from YAML
-            ms_client: Meilisearch client instance
         """
         self.state_code = state_code
         self.config = config
-        self.ms_client = ms_client
         self.state_config = self._get_state_config()
 
     def _get_state_config(self) -> dict:

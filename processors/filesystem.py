@@ -5,12 +5,15 @@ This is the default processor for states with files already downloaded.
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Optional, Iterator
 
 from metadata_handler import normalize_metadata
 from .base import BaseProcessor
+
+logger = logging.getLogger(__name__)
 
 
 class FilesystemProcessor(BaseProcessor):
@@ -31,7 +34,6 @@ class FilesystemProcessor(BaseProcessor):
         self,
         state_code: str,
         config: dict,
-        ms_client,
         files_path: Path,
         metadata_path: Path,
     ):
@@ -40,11 +42,10 @@ class FilesystemProcessor(BaseProcessor):
         Args:
             state_code: State code (e.g., "AP")
             config: Full configuration dictionary
-            ms_client: Meilisearch client
             files_path: Path to directory containing text files
             metadata_path: Path to metadata JSONL file
         """
-        super().__init__(state_code, config, ms_client)
+        super().__init__(state_code, config)
         self.files_path = Path(files_path)
         self.metadata_path = Path(metadata_path)
 
@@ -132,19 +133,30 @@ class FilesystemProcessor(BaseProcessor):
             file_name = self._find_djvu_file(item.get("files", []))
             if not file_name:
                 # Skip items without a DJVU text file
+                logger.error(
+                    f"No _djvu.txt file found in files list for state {self.state_code}, "
+                    f"item: {item.get('metadata', {}).get('id', 'unknown')}"
+                )
                 continue
 
             # Normalize metadata using state-specific handler
             try:
                 metadata_dict = normalize_metadata(self.state_code, item["metadata"])
-            except Exception:
+            except Exception as e:
                 # Log and skip malformed metadata
-                # In production, you might want to collect these errors
+                logger.error(
+                    f"Failed to normalize metadata for state {self.state_code}, "
+                    f"file: {file_name}: {e}"
+                )
                 continue
 
             # Read the discussion text
             discussion_text_path = self.files_path / file_name
             if not discussion_text_path.exists():
+                logger.error(
+                    f"Text file not found: {discussion_text_path} "
+                    f"(state: {self.state_code})"
+                )
                 continue
 
             with open(discussion_text_path, "r", encoding="utf-8") as f:
