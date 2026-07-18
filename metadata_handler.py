@@ -97,7 +97,7 @@ def normalize_metadata_ap(metadata: dict) -> LegislatureMetadata:
         term_number, term_start, term_end = 0, 0, 0
 
     return {
-        "state_code": "AP",
+        "index_code": "AP",
         "languages": metadata.get("language", []),
         "year": year,
         "month": month,
@@ -122,7 +122,7 @@ def normalize_metadata_ap(metadata: dict) -> LegislatureMetadata:
 def normalize_metadata_as(metadata: dict) -> LegislatureMetadata:
     year, month, day = map(int, metadata["date"].split("-"))
     return {
-        "state_code": "AS",
+        "index_code": "AS",
         "languages": metadata.get("language", []),
         "year": year,
         "month": month,
@@ -156,7 +156,7 @@ def normalize_metadata_ka(metadata: dict) -> LegislatureMetadata:
     session = int(session_match.group(1)) if session_match else 0
 
     return LegislatureMetadata(
-        state_code="KA",
+        index_code="KA",
         languages=metadata.get("language", []),
         year=year,
         month=month,
@@ -202,7 +202,7 @@ def normalize_metadata_kl(metadata: dict) -> LegislatureMetadata:
     )
 
     return LegislatureMetadata(
-        state_code="KL",
+        index_code="KL",
         languages=metadata.get("languages", []),
         year=year,
         month=month,
@@ -245,7 +245,7 @@ def normalize_metadata_rj(metadata: dict) -> LegislatureMetadata:
             session = int(session_match.group(1))
 
     return {
-        "state_code": "RJ",
+        "index_code": "RJ",
         "languages": metadata.get("language", []),
         "year": year,
         "month": month,
@@ -308,7 +308,7 @@ def normalize_metadata_tg(metadata: dict) -> LegislatureMetadata:
         term_number, term_start, term_end = 0, 0, 0
 
     return {
-        "state_code": "TG",
+        "index_code": "TG",
         "languages": metadata.get("language", []),
         "year": year,
         "month": month,
@@ -361,7 +361,7 @@ def normalize_metadata_tn(metadata: dict) -> LegislatureMetadata:
         session = 0
 
     return {
-        "state_code": "TN",
+        "index_code": "TN",
         "languages": metadata.get("language", []),
         "year": year,
         "month": month,
@@ -421,7 +421,7 @@ def normalize_metadata_up(metadata: dict) -> LegislatureMetadata:
         term_start, term_end = 0, 0
 
     return {
-        "state_code": "UP",
+        "index_code": "UP",
         "languages": metadata.get("language", []),
         "year": year,
         "month": month,
@@ -545,7 +545,7 @@ def normalize_metadata_wb(metadata: dict) -> LegislatureMetadata:
         sitting_end_day, sitting_end_month, sitting_end_year = 0, 0, 0
 
     return {
-        "state_code": "WB",
+        "index_code": "WB",
         "languages": metadata.get("language", []),
         "year": year,
         "month": month,
@@ -566,11 +566,11 @@ def normalize_metadata_wb(metadata: dict) -> LegislatureMetadata:
     }
 
 
-def normalize_metadata(state_code: str, metadata: dict) -> LegislatureMetadata:
+def normalize_metadata(index_code: str, metadata: dict) -> LegislatureMetadata:
     """
-    Normalise the metadata, since each state has its own format
+    Normalise the metadata, since each index has its own format
     """
-    match state_code:
+    match index_code:
         case "AP":
             return normalize_metadata_ap(metadata)
         case "AS":

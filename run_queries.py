@@ -95,8 +95,8 @@ def main():
         help="Maximum number of results per query (default: 20)",
     )
     parser.add_argument(
-        "--state-code",
-        help="State code to use for looking up index name in config (e.g., 'KA', 'AP')",
+        "--index-code",
+        help="Index code to use for looking up index name in config (e.g., 'KA', 'AP', 'LS')",
     )
     parser.add_argument(
         "--hybrid",
@@ -109,8 +109,8 @@ def main():
     with open(args.meilisearch_config) as f:
         config = yaml.safe_load(f)
 
-    # Determine index name - from argument, config with state code, or config global
-    index_name = config["index_config"][args.state_code]["index_name"]
+    # Determine index name - from argument, config with index code, or config global
+    index_name = config["index_config"][args.index_code]["index_name"]
     if index_name is None:
         parser.error("index_name must be provided in config file")
 
@@ -139,7 +139,7 @@ def main():
     query_run_metadata = {
         "hybrid_search_enabled": args.hybrid,
         "limit": args.limit,
-        "state_code": args.state_code,
+        "index_code": args.index_code,
         "timestamp": pd.Timestamp.now().isoformat(),
         "meilisearch_url": config["connection"]["URL"],
     }

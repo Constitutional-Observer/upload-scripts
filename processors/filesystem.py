@@ -1,7 +1,7 @@
 """Filesystem-based document processor.
 
 Processes pre-existing debate text files from the filesystem.
-This is the default processor for states with files already downloaded.
+This is the default processor for index codes with files already downloaded.
 """
 
 import json
@@ -32,7 +32,7 @@ class FilesystemProcessor(BaseProcessor):
 
     def __init__(
         self,
-        state_code: str,
+        index_code: str,
         config: dict,
         files_path: Path,
         metadata_path: Path,
@@ -40,12 +40,12 @@ class FilesystemProcessor(BaseProcessor):
         """Initialize the filesystem processor.
 
         Args:
-            state_code: State code (e.g., "AP")
+            index_code: Index code (e.g., "AP", "PARIVESH")
             config: Full configuration dictionary
             files_path: Path to directory containing text files
             metadata_path: Path to metadata JSONL file
         """
-        super().__init__(state_code, config)
+        super().__init__(index_code, config)
         self.files_path = Path(files_path)
         self.metadata_path = Path(metadata_path)
 
@@ -145,19 +145,19 @@ class FilesystemProcessor(BaseProcessor):
                 # Report error for items without a DJVU text file
                 item_id = item.get("metadata", {}).get("id", "unknown")
                 error_msg = (
-                    f"No _djvu.txt file found in files list for state {self.state_code}, "
+                    f"No _djvu.txt file found in files list for index_code {self.index_code}, "
                     f"item: {item_id}"
                 )
                 report_error(item_id, error_msg)
                 continue
 
-            # Normalize metadata using state-specific handler
+            # Normalize metadata using index_code-specific handler
             try:
-                metadata_dict = normalize_metadata(self.state_code, item["metadata"])
+                metadata_dict = normalize_metadata(self.index_code, item["metadata"])
             except Exception as e:
                 # Report error for malformed metadata
                 error_msg = (
-                    f"Failed to normalize metadata for state {self.state_code}, "
+                    f"Failed to normalize metadata for index_code {self.index_code}, "
                     f"file: {file_name}: {e}"
                 )
                 report_error(file_name, error_msg)
@@ -168,7 +168,7 @@ class FilesystemProcessor(BaseProcessor):
             if not discussion_text_path.exists():
                 error_msg = (
                     f"Text file not found: {discussion_text_path} "
-                    f"(state: {self.state_code})"
+                    f"(index_code: {self.index_code})"
                 )
                 report_error(file_name, error_msg)
                 continue
@@ -182,8 +182,8 @@ class FilesystemProcessor(BaseProcessor):
             # Yield one document per chunk
             for chunk_id, chunk in enumerate(file_chunks):
                 yield {
-                    "id": f"{self.state_code}_{file_name.replace('.', '_')}_{chunk_id}",
-                    "state_code": self.state_code,
+                    "id": f"{self.index_code}_{file_name.replace('.', '_')}_{chunk_id}",
+                    "index_code": self.index_code,
                     "file_name": file_name,
                     "chunk_id": chunk_id,
                     "__discussions": chunk,

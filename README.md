@@ -92,7 +92,7 @@ index_config:
 
 Settings are resolved in this order (highest priority first):
 1. Index variant-specific config (under `indexes.<variant>`)
-2. State-level config (under `<STATE_CODE>`)
+2. Index-level config (under `<INDEX_CODE>`)
 3. Global config (under `index_config.global`)
 4. Built-in defaults
 
@@ -110,44 +110,44 @@ python manage_collection.py <action> [options] [path]
 
 | Action | Description | Required Args |
 |--------|-------------|---------------|
-| `create` | Create indexes for states | `--states <STATE_CODES>` |
-| `delete` | Delete an index | `--index <NAME>` or `--states <STATE_CODES>` |
-| `upload` | Upload documents | `--states <STATE_CODES>` |
-| `print_schema` | Show index info | `--states <STATE_CODES>` |
+| `create` | Create indexes for indexes | `--index-codes <INDEX_CODES>` |
+| `delete` | Delete an index | `--index <NAME>` or `--index-codes <INDEX_CODES>` |
+| `upload` | Upload documents | `--index-codes <INDEX_CODES>` |
+| `print_schema` | Show index info | `--index-codes <INDEX_CODES>` |
 
 **Options:**
-- `--states <CODES>`: State codes (e.g., `KA AS TN`). Required for `upload`, `create`, and `print_schema` actions.
+- `--index-codes <CODES>`: Index codes (e.g., `KA AS TN`). Required for `upload`, `create`, and `print_schema` actions.
 - `--config <FILE>`: Config file path (default: `meilisearch_config.yaml`)
 - `--prefix <PREFIX>`: Index name prefix (default: `state_legislature_debates`)
 - `--limit <N>`: Limit documents to process (for upload action)
 - `--index <NAME>`: Index name for delete action
 - `--files-path <PATH>`: Override files path from config
 - `--metadata-path <PATH>`: Override metadata path from config
-- `--state-code <CODE>`: Explicit state code (auto-derived from files_path if omitted)
+- `--index-code <CODE>`: Explicit index code (auto-derived from files_path if omitted)
 
 ### Examples
 
 ```bash
 # Create indexes for Karnataka and Assam (creates all variants defined in config)
-python manage_collection.py create --states KA AS
+python manage_collection.py create --index-codes KA AS
 
 # Upload documents for Assam (uses paths from config)
-python manage_collection.py upload --states AS
+python manage_collection.py upload --index-codes AS
 
 # Upload with limit (test with 100 docs)
-python manage_collection.py upload --states AS --limit 100
+python manage_collection.py upload --index-codes AS --limit 100
 
 # Upload with explicit files path override
-python manage_collection.py upload --states AS --files-path /custom/path/to/AS
+python manage_collection.py upload --index-codes AS --files-path /custom/path/to/AS
 
 # Delete an index (prompts for confirmation)
 python manage_collection.py delete --index state_legislature_debates_as
 
-# Delete all indexes for a state
-python manage_collection.py delete --states AS
+# Delete all indexes for an index code
+python manage_collection.py delete --index-codes AS
 
 # View index schema for Karnataka
-python manage_collection.py print_schema --states KA
+python manage_collection.py print_schema --index-codes KA
 ```
 
 ---
@@ -158,7 +158,7 @@ python manage_collection.py print_schema --states KA
 /
 └── /datasets/
     └── legislature_debates/
-        └── <STATE_CODE>/   # e.g., AS, KA, TN
+        └── <INDEX_CODE>/   # e.g., AS, KA, TN
             ├── all_metadata.json   # Internet Archive metadata (JSONL)
             └── downloads/          # Extracted text files (_djvu.txt)
 ```
@@ -179,7 +179,7 @@ See [`metadata_schema.py`](metadata_schema.py) for complete field definitions.
 
 | Field | Type | Facet | Searchable | Description |
 |-------|------|-------|------------|-------------|
-| `state_code` | str | Yes | Yes | State abbreviation (AP, AS, KA, etc.) |
+| `index_code` | str | Yes | Yes | Index code (AP, AS, KA, etc.) |
 | `year` | int | Yes | Yes | Document year |
 | `month` | int | Yes | Yes | Document month |
 | `day` | int | Yes | Yes | Document day |
@@ -205,17 +205,17 @@ See [`metadata_schema.py`](metadata_schema.py) for complete field definitions.
 
 See [`LegislatureMetadata`](metadata_schema.py) for complete field list.
 
-**Supported state codes:** `AP`, `AS`, `RJ`, `KA`, `KL`, `TN`, `TS`, `UP`, `WB`, `TG`
+**Supported index codes:** `AP`, `AS`, `RJ`, `KA`, `KL`, `TN`, `TS`, `UP`, `WB`, `TG`
 
 ---
 
 ## Workflow
 
 1. **Extract**: Download files from Internet Archive, extract text (DjVu -> text)
-2. **Organize**: Place in `/datasets/<type>/<STATE>/` with `all_metadata.json` and `downloads/`
-3. **Configure**: Create `meilisearch_config.yaml` with `files_path` and `metadata_path` for each state
-4. **Create**: `python manage_collection.py create --states <CODES>`
-5. **Upload**: `python manage_collection.py upload --states <CODES>`
+2. **Organize**: Place in `/datasets/<type>/<INDEX_CODE>/` with `all_metadata.json` and `downloads/`
+3. **Configure**: Create `meilisearch_config.yaml` with `files_path` and `metadata_path` for each index
+4. **Create**: `python manage_collection.py create --index-codes <CODES>`
+5. **Upload**: `python manage_collection.py upload --index-codes <CODES>`
 
 
 ## Benchmarking
@@ -223,11 +223,11 @@ See [`LegislatureMetadata`](metadata_schema.py) for complete field list.
 `run_queries.py` will store the results for a list of predefined queries, provided in CSV format. Sample usage:
 
 ```sh
-# With state-level index names in config
-python run_queries.py configs/prod.yaml sample_queries_kannada.csv ka_results.parquet --state-code KA
+# With index-level index names in config
+python run_queries.py configs/prod.yaml sample_queries_kannada.csv ka_results.parquet --index-code KA
 
 # Or with explicit --limit
-python run_queries.py configs/prod.yaml sample_queries_kannada.csv ka_results.parquet --state-code KA --limit 10
+python run_queries.py configs/prod.yaml sample_queries_kannada.csv ka_results.parquet --index-code KA --limit 10
 ```
 
 This will generate a Parquet file (e.g., `ka_results.parquet`) with query results, and a sidecar metadata file (e.g., `ka_results.parquet.metadata.json`). Each result entry contains a list of hits. The results can be compared with previous versions to see if search performance has improved.
@@ -235,7 +235,7 @@ This will generate a Parquet file (e.g., `ka_results.parquet`) with query result
 ### Script args:
 
 ```
-  usage: run_queries.py [-h] [--limit LIMIT] [--state-code STATE_CODE] [--hybrid] meilisearch_config queries_file output_file
+  usage: run_queries.py [-h] [--limit LIMIT] [--index-code INDEX_CODE] [--hybrid] meilisearch_config queries_file output_file
 
 positional arguments:
   meilisearch_config    Path to config YAML file
@@ -245,10 +245,10 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --limit LIMIT         Maximum number of results per query (default: 20)
-  --state-code CODE     State code to look up index_name in config (required if config uses state-level index names)
+  --index-code CODE     Index code to look up index_name in config (required if config uses index-level index names)
   --hybrid             Enable hybrid search with embeddings (default: False)
 ```
 
-**Note:** The `index_name` is now read from the config file using `index_config.<state_code>.index_name`. The `--state-code` argument is required when your config defines index names at the state level.
+**Note:** The `index_name` is now read from the config file using `index_config.<index_code>.index_name`. The `--index-code` argument is required when your config defines index names at the index level.
 
 Queries can be found in the [wiki](https://github.com/Constitutional-Observer/wiki/tree/main/benchmarking)

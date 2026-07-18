@@ -5,7 +5,7 @@ from typing import Callable, Optional, Iterator
 
 
 class BaseProcessor(ABC):
-    """Abstract base class for state-specific document processors.
+    """Abstract base class for index-specific document processors.
 
     A processor is responsible for:
     1. Loading/fetching raw documents
@@ -16,7 +16,7 @@ class BaseProcessor(ABC):
     All processors yield documents with the same structure:
     {
         "id": str,           # Unique document ID
-        "state_code": str,   # State identifier (e.g., "AP", "LS")
+        "index_code": str,   # Index identifier (e.g., "AP", "LS", "PARIVESH")
         "file_name": str,    # Original file name
         "chunk_id": int,     # Chunk index within the file
         "__discussions": str, # Text content of this chunk
@@ -24,23 +24,23 @@ class BaseProcessor(ABC):
     }
     """
 
-    def __init__(self, state_code: str, config: dict):
+    def __init__(self, index_code: str, config: dict):
         """Initialize the processor.
 
         Args:
-            state_code: Two-letter state code (e.g., "AP", "LS")
+            index_code: Index code (e.g., "AP", "LS", "PARIVESH")
             config: Full configuration dictionary from YAML
         """
-        self.state_code = state_code
+        self.index_code = index_code
         self.config = config
-        self.state_config = self._get_state_config()
+        self.index_code_config = self._get_index_code_config()
 
-    def _get_state_config(self) -> dict:
-        """Get state-specific config with fallback to global defaults."""
-        state_cfg = self.config.get("index_config", {}).get(self.state_code, {})
+    def _get_index_code_config(self) -> dict:
+        """Get index_code-specific config with fallback to global defaults."""
+        index_code_cfg = self.config.get("index_config", {}).get(self.index_code, {})
         global_cfg = self.config.get("index_config", {}).get("global", {})
-        # State config overrides global
-        return {**global_cfg, **state_cfg}
+        # Index_code config overrides global
+        return {**global_cfg, **index_code_cfg}
 
     @abstractmethod
     def get_documents(
@@ -60,5 +60,5 @@ class BaseProcessor(ABC):
         pass
 
     def get_chunk_config(self) -> dict:
-        """Get chunking configuration for this state."""
-        return self.state_config.get("chunking", {})
+        """Get chunking configuration for this index_code."""
+        return self.index_code_config.get("chunking", {})

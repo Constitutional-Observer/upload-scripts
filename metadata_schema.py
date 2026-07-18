@@ -16,12 +16,12 @@ FieldMetadata = dict[Literal["facet", "locale", "searchable"], bool | str]
 
 class LegislatureMetadata(TypedDict):
     """
-    List of all fields provided by all states. Here mostly for
+    List of all fields provided by all indexes. Here mostly for
     documentation and understanding the possible list of fields
-    Additional fields may be needed as more states get added
+    Additional fields may be needed as more indexes get added
     """
 
-    state_code: str
+    index_code: str
     languages: list[str]
 
     year: int
@@ -57,7 +57,7 @@ class LegislatureMetadata(TypedDict):
     discussions: NotRequired[str]
 
 
-STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB", "TG"]
+INDEX_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB", "TG"]
 
 
 @dataclass
@@ -76,7 +76,7 @@ class LegislatureMetadataBase(BaseModel):
     the additional fields it will provide (can also be no additional fields)
     """
 
-    state_code: Annotated[str, {"facet": False, "description": "State code"}]
+    index_code: Annotated[str, {"facet": False, "description": "Index code"}]
     file_name: Annotated[str, {"facet": True, "description": "File name"}]
     year: Annotated[int, {"facet": True, "description": "Year", "searchable": True}]
     month: Annotated[int, {"facet": True, "description": "Month", "searchable": True}]
@@ -239,13 +239,13 @@ class LegislatureMetadataTG(LegislatureMetadataBase):
     term_end: Annotated[int, {"facet": False, "description": "Term end"}]
 
 
-# Map state codes to their metadata classes
-STATE_METADATA_CLASSES = {
+# Map index codes to their metadata classes
+INDEX_METADATA_CLASSES = {
     "AP": LegislatureMetadataAP,
     "KA": LegislatureMetadataKA,
     "KL": LegislatureMetadataKL,
     "TG": LegislatureMetadataTG,
-    # States that only use base fields
+    # Indexes that only use base fields
     "AS": LegislatureMetadataBase,
     "RJ": LegislatureMetadataBase,
     "TN": LegislatureMetadataBase,
@@ -255,21 +255,21 @@ STATE_METADATA_CLASSES = {
 }
 
 
-def get_metadata_schema(state_code: str) -> list[dict[str, Any]]:
+def get_metadata_schema(index_code: str) -> list[dict[str, Any]]:
     """
-    Generate metadata schema for a specific state or all states.
+    Generate metadata schema for a specific index or all indexes.
     This is only needed when creating/updating search indexes.
 
     Args:
-        state_code: If provided, returns schema for just this state. Otherwise returns all states.
+        index_code: If provided, returns schema for just this index. Otherwise returns all indexes.
 
     Returns:
-        Dictionary of state_code -> schema for all states, or just the schema list for one state.
+        Dictionary of index_code -> schema for all indexes, or just the schema list for one index.
     """
-    if state_code not in STATE_METADATA_CLASSES:
-        raise ValueError(f"Unknown state code: {state_code}")
+    if index_code not in INDEX_METADATA_CLASSES:
+        raise ValueError(f"Unknown index code: {index_code}")
 
-    metadata_class = STATE_METADATA_CLASSES[state_code]
+    metadata_class = INDEX_METADATA_CLASSES[index_code]
     # Get state-specific fields (excluding base class fields)
     state_fields = []
     for field_def in metadata_class.get_field_schema():
