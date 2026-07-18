@@ -5,6 +5,7 @@ also differently named for each state. This module provides The normalized list
 of fields, statewise. For e.g. if one state has an debate_date, and another
 a date_of_debate, this module will provide "debate_date" as a common field.
 """
+
 from typing import TypedDict, NotRequired, Any, Annotated, Literal
 from pydantic import BaseModel
 from dataclasses import dataclass
@@ -12,12 +13,14 @@ from dataclasses import dataclass
 # Type for field metadata
 FieldMetadata = dict[Literal["facet", "locale", "searchable"], bool | str]
 
+
 class LegislatureMetadata(TypedDict):
     """
     List of all fields provided by all states. Here mostly for
     documentation and understanding the possible list of fields
     Additional fields may be needed as more states get added
     """
+
     state_code: str
     languages: list[str]
 
@@ -53,14 +56,18 @@ class LegislatureMetadata(TypedDict):
     participants_kn: NotRequired[str]
     discussions: NotRequired[str]
 
+
 STATE_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB", "TG"]
+
 
 @dataclass
 class FieldParams:
     """Metadata parameters for each field"""
+
     facet: bool = False
     locale: str | None = None
     searchable: bool = True
+
 
 class LegislatureMetadataBase(BaseModel):
     """
@@ -68,6 +75,7 @@ class LegislatureMetadataBase(BaseModel):
     Each collection is expected to inherit this class to declare
     the additional fields it will provide (can also be no additional fields)
     """
+
     state_code: Annotated[str, {"facet": False, "description": "State code"}]
     file_name: Annotated[str, {"facet": True, "description": "File name"}]
     year: Annotated[int, {"facet": True, "description": "Year", "searchable": True}]
@@ -80,76 +88,91 @@ class LegislatureMetadataBase(BaseModel):
     def get_field_schema(cls) -> list[dict[str, Any]]:
         """Generate schema definition from Pydantic model fields with Annotated metadata"""
         schema = []
-        
+
         # Get the original annotations to access metadata
         annotations = _get_all_annotations(cls)
-        
+
         for name, field_info in cls.model_fields.items():
             # Get metadata from Annotated type
             facet = False
             locale = None
             description = ""
-            
+
             # Check if this field has Annotated metadata
             if name in annotations:
                 annotation = annotations[name]
                 for metadata in annotation.__metadata__:
-                    facet = metadata.get('facet', False)
-                    locale = metadata.get('locale', None)
-                    description = metadata.get('description', "")
+                    facet = metadata.get("facet", False)
+                    locale = metadata.get("locale", None)
+                    description = metadata.get("description", "")
                     break
-            
+
             # Convert Python type to schema type
-            type_map = {
-                str: "string",
-                int: "int32",
-                list: "string[]"
-            }
-            
+            type_map = {str: "string", int: "int32", list: "string[]"}
+
             # Get the base type
             base_type = field_info.annotation
             if hasattr(field_info.annotation, "__origin__"):
-                base_type = field_info.annotation.__args__[0] if field_info.annotation.__args__ else str
-            
+                base_type = (
+                    field_info.annotation.__args__[0]
+                    if field_info.annotation.__args__
+                    else str
+                )
+
             schema_type = type_map.get(base_type, "string")
-            
+
             field_def = {
                 "name": name,
                 "type": schema_type,
                 "facet": facet,
             }
-            
+
             if locale:
                 field_def["locale"] = locale
             if description:
                 field_def["description"] = description
-                
+
             schema.append(field_def)
         return schema
+
 
 def _get_all_annotations(cls):
     annotations = {}
     for base in reversed(cls.__mro__):
-        annotations.update(getattr(base, '__annotations__', {}))
+        annotations.update(getattr(base, "__annotations__", {}))
     return annotations
+
 
 class LegislatureMetadataAP(LegislatureMetadataBase):
     """Andhra Pradesh specific metadata fields"""
+
     house: Annotated[str, {"facet": True, "description": "House"}]
     session: Annotated[int, {"facet": True, "description": "Session"}]
     sitting_number: Annotated[int, {"facet": False, "description": "Sitting number"}]
-    sitting_start_year: Annotated[int, {"facet": False, "description": "Sitting start year"}]
-    sitting_start_month: Annotated[int, {"facet": False, "description": "Sitting start month"}]
-    sitting_start_day: Annotated[int, {"facet": False, "description": "Sitting start day"}]
-    sitting_end_year: Annotated[int, {"facet": False, "description": "Sitting end year"}]
-    sitting_end_month: Annotated[int, {"facet": False, "description": "Sitting end month"}]
+    sitting_start_year: Annotated[
+        int, {"facet": False, "description": "Sitting start year"}
+    ]
+    sitting_start_month: Annotated[
+        int, {"facet": False, "description": "Sitting start month"}
+    ]
+    sitting_start_day: Annotated[
+        int, {"facet": False, "description": "Sitting start day"}
+    ]
+    sitting_end_year: Annotated[
+        int, {"facet": False, "description": "Sitting end year"}
+    ]
+    sitting_end_month: Annotated[
+        int, {"facet": False, "description": "Sitting end month"}
+    ]
     sitting_end_day: Annotated[int, {"facet": False, "description": "Sitting end day"}]
     term_number: Annotated[int, {"facet": True, "description": "Term number"}]
     term_start: Annotated[int, {"facet": False, "description": "Term start"}]
     term_end: Annotated[int, {"facet": False, "description": "Term end"}]
 
+
 class LegislatureMetadataKA(LegislatureMetadataBase):
     """Karnataka specific metadata fields"""
+
     session: Annotated[int, {"facet": True, "description": "Session"}]
     term_number: Annotated[int, {"facet": True, "description": "Term number"}]
     term_start: Annotated[int, {"facet": False, "description": "Term start"}]
@@ -159,32 +182,62 @@ class LegislatureMetadataKA(LegislatureMetadataBase):
     end_page: Annotated[int, {"facet": False, "description": "End page"}]
     book_id: Annotated[int, {"facet": False, "description": "Book ID"}]
     place_session: Annotated[str, {"facet": True, "description": "Place session"}]
-    minister_en: Annotated[str, {"facet": False, "description": "Minister name (English)"}]
-    minister_kn: Annotated[str, {"facet": False, "description": "Minister name (Kannada)", "locale": "kn"}]
-    questioner_en: Annotated[str, {"facet": False, "description": "Questioner name (English)"}]
-    questioner_kn: Annotated[str, {"facet": False, "description": "Questioner name (Kannada)", "locale": "kn"}]
-    participants_en: Annotated[str, {"facet": False, "description": "Participants (English)"}]
-    participants_kn: Annotated[str, {"facet": False, "description": "Participants (Kannada)", "locale": "kn"}]
+    minister_en: Annotated[
+        str, {"facet": False, "description": "Minister name (English)"}
+    ]
+    minister_kn: Annotated[
+        str, {"facet": False, "description": "Minister name (Kannada)", "locale": "kn"}
+    ]
+    questioner_en: Annotated[
+        str, {"facet": False, "description": "Questioner name (English)"}
+    ]
+    questioner_kn: Annotated[
+        str,
+        {"facet": False, "description": "Questioner name (Kannada)", "locale": "kn"},
+    ]
+    participants_en: Annotated[
+        str, {"facet": False, "description": "Participants (English)"}
+    ]
+    participants_kn: Annotated[
+        str, {"facet": False, "description": "Participants (Kannada)", "locale": "kn"}
+    ]
+
 
 class LegislatureMetadataKL(LegislatureMetadataBase):
     """Kerala specific metadata fields"""
-    discussions: Annotated[str, {"facet": False, "description": "Discussions", "locale": "ml"}]
+
+    discussions: Annotated[
+        str, {"facet": False, "description": "Discussions", "locale": "ml"}
+    ]
     subject: Annotated[str, {"facet": False, "description": "Subject"}]
+
 
 class LegislatureMetadataTG(LegislatureMetadataBase):
     """Telangana specific metadata fields"""
+
     house: Annotated[str, {"facet": True, "description": "House"}]
     session: Annotated[int, {"facet": True, "description": "Session"}]
     sitting_number: Annotated[int, {"facet": False, "description": "Sitting number"}]
-    sitting_start_year: Annotated[int, {"facet": False, "description": "Sitting start year"}]
-    sitting_start_month: Annotated[int, {"facet": False, "description": "Sitting start month"}]
-    sitting_start_day: Annotated[int, {"facet": False, "description": "Sitting start day"}]
-    sitting_end_year: Annotated[int, {"facet": False, "description": "Sitting end year"}]
-    sitting_end_month: Annotated[int, {"facet": False, "description": "Sitting end month"}]
+    sitting_start_year: Annotated[
+        int, {"facet": False, "description": "Sitting start year"}
+    ]
+    sitting_start_month: Annotated[
+        int, {"facet": False, "description": "Sitting start month"}
+    ]
+    sitting_start_day: Annotated[
+        int, {"facet": False, "description": "Sitting start day"}
+    ]
+    sitting_end_year: Annotated[
+        int, {"facet": False, "description": "Sitting end year"}
+    ]
+    sitting_end_month: Annotated[
+        int, {"facet": False, "description": "Sitting end month"}
+    ]
     sitting_end_day: Annotated[int, {"facet": False, "description": "Sitting end day"}]
     term_number: Annotated[int, {"facet": True, "description": "Term number"}]
     term_start: Annotated[int, {"facet": False, "description": "Term start"}]
     term_end: Annotated[int, {"facet": False, "description": "Term end"}]
+
 
 # Map state codes to their metadata classes
 STATE_METADATA_CLASSES = {
@@ -206,22 +259,22 @@ def get_metadata_schema(state_code: str) -> list[dict[str, Any]]:
     """
     Generate metadata schema for a specific state or all states.
     This is only needed when creating/updating search indexes.
-    
+
     Args:
         state_code: If provided, returns schema for just this state. Otherwise returns all states.
-    
+
     Returns:
         Dictionary of state_code -> schema for all states, or just the schema list for one state.
     """
     if state_code not in STATE_METADATA_CLASSES:
         raise ValueError(f"Unknown state code: {state_code}")
-    
+
     metadata_class = STATE_METADATA_CLASSES[state_code]
     # Get state-specific fields (excluding base class fields)
     state_fields = []
     for field_def in metadata_class.get_field_schema():
         state_fields.append(field_def)
-    
+
     # Start with discussions field (common to all states)
     schema = [{"name": "discussions", "type": "string"}]
     schema.extend(state_fields)
