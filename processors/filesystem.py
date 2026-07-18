@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Iterator
+from typing import Callable, Optional, Iterator
 
 from metadata_handler import normalize_metadata
 from .base import BaseProcessor
@@ -112,11 +112,16 @@ class FilesystemProcessor(BaseProcessor):
             metadata_text = f.read()
         return list(map(json.loads, metadata_text.splitlines()))
 
-    def get_documents(self, limit: Optional[int] = None) -> Iterator[dict]:
+    def get_documents(
+        self,
+        limit: Optional[int] = None,
+        on_error: Optional[Callable[[str, str], None]] = None,
+    ) -> Iterator[dict]:
         """Generate documents from filesystem files.
 
         Args:
             limit: Maximum number of metadata items to process
+            on_error: Optional callback called with (file, error_msg) for each error
 
         Yields:
             Meilisearch-ready document dictionaries
@@ -128,35 +133,44 @@ class FilesystemProcessor(BaseProcessor):
 
         chunk_config = self.get_chunk_config()
 
+        def report_error(file: str, error_msg: str):
+            logger.error(error_msg)
+            if on_error:
+                on_error(file, error_msg)
+
         for item in metadata:
             # Find the text file
             file_name = self._find_djvu_file(item.get("files", []))
             if not file_name:
-                # Skip items without a DJVU text file
-                logger.error(
+                # Report error for items without a DJVU text file
+                item_id = item.get("metadata", {}).get("id", "unknown")
+                error_msg = (
                     f"No _djvu.txt file found in files list for state {self.state_code}, "
-                    f"item: {item.get('metadata', {}).get('id', 'unknown')}"
+                    f"item: {item_id}"
                 )
+                report_error(item_id, error_msg)
                 continue
 
             # Normalize metadata using state-specific handler
             try:
                 metadata_dict = normalize_metadata(self.state_code, item["metadata"])
             except Exception as e:
-                # Log and skip malformed metadata
-                logger.error(
+                # Report error for malformed metadata
+                error_msg = (
                     f"Failed to normalize metadata for state {self.state_code}, "
                     f"file: {file_name}: {e}"
                 )
+                report_error(file_name, error_msg)
                 continue
 
             # Read the discussion text
             discussion_text_path = self.files_path / file_name
             if not discussion_text_path.exists():
-                logger.error(
+                error_msg = (
                     f"Text file not found: {discussion_text_path} "
                     f"(state: {self.state_code})"
                 )
+                report_error(file_name, error_msg)
                 continue
 
             with open(discussion_text_path, "r", encoding="utf-8") as f:

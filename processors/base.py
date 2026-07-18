@@ -1,7 +1,7 @@
 """Base processor interface for document processing pipelines."""
 
 from abc import ABC, abstractmethod
-from typing import Optional, Iterator
+from typing import Callable, Optional, Iterator
 
 
 class BaseProcessor(ABC):
@@ -43,11 +43,16 @@ class BaseProcessor(ABC):
         return {**global_cfg, **state_cfg}
 
     @abstractmethod
-    def get_documents(self, limit: Optional[int] = None) -> Iterator[dict]:
+    def get_documents(
+        self,
+        limit: Optional[int] = None,
+        on_error: Optional[Callable[[str, str], None]] = None,
+    ) -> Iterator[dict]:
         """Generate documents ready for Meilisearch indexing.
 
         Args:
             limit: Maximum number of source items to process (not chunks)
+            on_error: Optional callback called with (file, error_msg) for each error
 
         Yields:
             Dictionary with document structure as described in class docstring.
