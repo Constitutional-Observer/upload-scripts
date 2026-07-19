@@ -139,7 +139,12 @@ def delete_collections(
 def create_collections(
     index_codes, meilisearch_config: dict, prefix: str = "state_legislature_debates"
 ):
-    """Create Meilisearch collections for specified index codes"""
+    """Create Meilisearch collections for specified index codes, or update settings if they already exist.
+
+    For each index, creates the collection if it doesn't exist, or updates its
+    searchable, filterable, and sortable attributes, embedders, and typo tolerance
+    settings if it does.
+    """
     client = get_client(meilisearch_config)
 
     # Get all index configs, filtered by index_codes if specified
@@ -239,7 +244,11 @@ def upload_from_processor(
     progress_desc: str = "processing",
     total_for_progress: Optional[int] = None,
 ) -> tuple[int, list[dict], list[dict]]:
-    """Upload documents from a DocumentProcessor to Meilisearch.
+    """Upload (upsert) documents from a DocumentProcessor to Meilisearch.
+
+    Documents are added using Meilisearch's add_documents which performs an upsert:
+    if a document with the same primary key (id) already exists, it is updated;
+    otherwise, it is inserted.
 
     Args:
         processor: A DocumentProcessor instance (callable that yields document dicts)
@@ -420,6 +429,109 @@ def get_metadata_count(
         return None
 
 
+def do_upload(
+    index_codes_to_process: list[str],
+    client: meilisearch.Client,
+    meilisearch_config: dict,
+    args: argparse.Namespace,
+    prefix: str,
+) -> None:
+    """Execute the upload (upsert) workflow for the given index codes.
+
+    For each index code, processes documents through the configured processor
+    and upserts them into Meilisearch. Uses add_documents which updates existing
+    documents or inserts new ones based on the document id.
+    """
+    # Get all index configs
+    all_index_configs = get_index_configs(meilisearch_config, prefix)
+
+    for index_code in index_codes_to_process:
+        # Get all indexes for this index_code
+        index_code_index_configs = [
+            (name, config) for name, ic, config in all_index_configs if ic == index_code
+        ]
+
+        if not index_code_index_configs:
+            print(f"Warning: No index configs found for index code {index_code}")
+            continue
+
+        for index_name, index_config in index_code_index_configs:
+            print(
+                f"\n=== Uploading to index: {index_name} (index_code: {index_code}) ==="
+            )
+
+            # Resolve paths from index config (falling back to index_code config)
+            files_path = resolve_files_path(
+                args.files_path, index_code, meilisearch_config, index_config
+            )
+            metadata_path = resolve_metadata_path(
+                args.metadata_path,
+                index_code,
+                meilisearch_config,
+                files_path,
+                index_config,
+            )
+
+            # Get processor type from config (default: functional)
+            processor_name = index_config.get("processor", "functional")
+
+            # Get total for progress bar
+            total_for_progress = get_metadata_count(metadata_path, args.limit)
+
+            # Create processor using factory
+            processor = create_processor(
+                processor_name=processor_name,
+                index_code=index_code,
+                files_path=files_path,
+                metadata_path=metadata_path,
+                meilisearch_config=meilisearch_config,
+                index_config=index_config,
+            )
+
+            # Get batch size from config using centralized function
+            batch_size = get_batch_size(meilisearch_config, index_code)
+
+            # Upload documents
+            try:
+                total_count, responses, file_errors = upload_from_processor(
+                    processor,
+                    client,
+                    index_name,
+                    batch_size=batch_size,
+                    use_tqdm=True,
+                    limit=args.limit,
+                    progress_desc=index_code,
+                    total_for_progress=total_for_progress,
+                )
+
+                # Save batch responses for debugging
+                with open(
+                    f"meilisearch_upload_{index_code}_{index_name.replace(prefix + '_', '')}.json",
+                    "w",
+                ) as f:
+                    json.dump(responses, f)
+
+                # Save file errors to metadata errors file
+                error_filename = f"metadata_errors_{index_code}.json"
+                with open(error_filename, "w") as f:
+                    json.dump(file_errors, f)
+
+                # Count successful uploads
+                success_count = sum(r["count"] for r in responses if r.get("success"))
+                error_count = sum(1 for r in responses if not r.get("success"))
+
+                print(f"Upload completed for {index_name}")
+                print(f"  Total chunks uploaded: {total_count}")
+                print(
+                    f"  Batch responses: {len(responses)} ({success_count} successful, {error_count} errors)"
+                )
+                print(f"  File errors saved to: {error_filename}")
+
+            except Exception as e:
+                print(f"Error processing index {index_name}: {e}")
+                traceback.print_exc()
+
+
 def create_processor(
     processor_name: str,
     index_code: str,
@@ -515,8 +627,8 @@ def main():
     )
     parser.add_argument(
         "action",
-        choices=["delete", "create", "print_schema", "upload"],
-        help="Action to perform: delete, create, print_schema, or upload",
+        choices=["delete", "create", "print_schema", "upload", "add", "remove"],
+        help="Action to perform: delete, create (or update settings), print_schema, upload (upsert), add (create+upsert), or remove (delete)",
     )
     parser.add_argument(
         "--index-codes",
@@ -563,7 +675,7 @@ def main():
     client = get_client(meilisearch_config)
 
     match args.action:
-        case "delete":
+        case "delete" | "remove":
             delete_collections(
                 [args.index] if args.index else [], meilisearch_config, index_codes
             )
@@ -571,105 +683,22 @@ def main():
             create_collections(index_codes, meilisearch_config, args.prefix)
         case "print_schema":
             print_collections_info(index_codes, meilisearch_config, args.prefix)
+        case "add":
+            # Create collections first, then upload
+            create_collections(index_codes, meilisearch_config, args.prefix)
+            index_codes_to_process = args.index_codes
+            if not index_codes_to_process:
+                raise ValueError("--index-codes is required for add action")
+            do_upload(
+                index_codes_to_process, client, meilisearch_config, args, args.prefix
+            )
         case "upload":
             index_codes_to_process = args.index_codes
             if not index_codes_to_process:
                 raise ValueError("--index-codes is required for upload action")
-
-            # Get all index configs
-            all_index_configs = get_index_configs(meilisearch_config, args.prefix)
-
-            for index_code in index_codes_to_process:
-                # Get all indexes for this index_code
-                index_code_index_configs = [
-                    (name, config)
-                    for name, ic, config in all_index_configs
-                    if ic == index_code
-                ]
-
-                if not index_code_index_configs:
-                    print(
-                        f"Warning: No index configs found for index code {index_code}"
-                    )
-                    continue
-
-                for index_name, index_config in index_code_index_configs:
-                    print(
-                        f"\n=== Uploading to index: {index_name} (index_code: {index_code}) ==="
-                    )
-
-                    # Resolve paths from index config (falling back to index_code config)
-                    files_path = resolve_files_path(
-                        args.files_path, index_code, meilisearch_config, index_config
-                    )
-                    metadata_path = resolve_metadata_path(
-                        args.metadata_path,
-                        index_code,
-                        meilisearch_config,
-                        files_path,
-                        index_config,
-                    )
-
-                    # Get processor type from config (default: functional)
-                    processor_name = index_config.get("processor", "functional")
-
-                    # Get total for progress bar
-                    total_for_progress = get_metadata_count(metadata_path, args.limit)
-
-                    # Create processor using factory
-                    processor = create_processor(
-                        processor_name=processor_name,
-                        index_code=index_code,
-                        files_path=files_path,
-                        metadata_path=metadata_path,
-                        meilisearch_config=meilisearch_config,
-                        index_config=index_config,
-                    )
-
-                    # Get batch size from config using centralized function
-                    batch_size = get_batch_size(meilisearch_config, index_code)
-
-                    # Upload documents
-                    try:
-                        total_count, responses, file_errors = upload_from_processor(
-                            processor,
-                            client,
-                            index_name,
-                            batch_size=batch_size,
-                            use_tqdm=True,
-                            limit=args.limit,
-                            progress_desc=index_code,
-                            total_for_progress=total_for_progress,
-                        )
-
-                        # Save batch responses for debugging
-                        with open(
-                            f"meilisearch_upload_{index_code}_{index_name.replace(args.prefix + '_', '')}.json",
-                            "w",
-                        ) as f:
-                            json.dump(responses, f)
-
-                        # Save file errors to metadata errors file
-                        error_filename = f"metadata_errors_{index_code}.json"
-                        with open(error_filename, "w") as f:
-                            json.dump(file_errors, f)
-
-                        # Count successful uploads
-                        success_count = sum(
-                            r["count"] for r in responses if r.get("success")
-                        )
-                        error_count = sum(1 for r in responses if not r.get("success"))
-
-                        print(f"Upload completed for {index_name}")
-                        print(f"  Total chunks uploaded: {total_count}")
-                        print(
-                            f"  Batch responses: {len(responses)} ({success_count} successful, {error_count} errors)"
-                        )
-                        print(f"  File errors saved to: {error_filename}")
-
-                    except Exception as e:
-                        print(f"Error processing index {index_name}: {e}")
-                        traceback.print_exc()
+            do_upload(
+                index_codes_to_process, client, meilisearch_config, args, args.prefix
+            )
         case _:
             print("Unexpected argument:", args.action)
 
