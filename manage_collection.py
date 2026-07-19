@@ -5,7 +5,7 @@ import json
 import logging
 import traceback
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Iterator, Optional
 from more_itertools import batched
 
 import meilisearch
@@ -15,8 +15,12 @@ from tqdm import tqdm
 import yaml
 
 from metadata_schema import get_metadata_schema
-from processors import FilesystemProcessor
-from processors.base import BaseProcessor
+from processors.base import DocumentProcessor
+from processors.functional_pipeline import (
+    process_index,
+    FetchConfig,
+    ChunkConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +109,9 @@ def delete_collections(
     if index_codes:
         # Get all indexes for the specified index codes
         all_index_configs = get_index_configs(meilisearch_config)
-        index_code_indexes = [name for name, ic, _ in all_index_configs if ic in index_codes]
+        index_code_indexes = [
+            name for name, ic, _ in all_index_configs if ic in index_codes
+        ]
         indexes_to_delete.extend(index_code_indexes)
 
     # Remove duplicates while preserving order
@@ -140,7 +146,9 @@ def create_collections(
     all_index_configs = get_index_configs(meilisearch_config, prefix)
 
     if index_codes:
-        index_configs = [(n, ic, c) for n, ic, c in all_index_configs if ic in index_codes]
+        index_configs = [
+            (n, ic, c) for n, ic, c in all_index_configs if ic in index_codes
+        ]
     else:
         index_configs = all_index_configs
 
@@ -198,7 +206,9 @@ def print_collections_info(
     all_index_configs = get_index_configs(meilisearch_config, prefix)
 
     if index_codes:
-        index_configs = [(n, ic, c) for n, ic, c in all_index_configs if ic in index_codes]
+        index_configs = [
+            (n, ic, c) for n, ic, c in all_index_configs if ic in index_codes
+        ]
     else:
         index_configs = all_index_configs
 
@@ -220,22 +230,26 @@ def print_collections_info(
 
 
 def upload_from_processor(
-    processor: BaseProcessor,
+    processor: DocumentProcessor,
     client: meilisearch.Client,
     index_name: str,
     batch_size: int = 1000,
     use_tqdm: bool = True,
     limit: Optional[int] = None,
+    progress_desc: str = "processing",
+    total_for_progress: Optional[int] = None,
 ) -> tuple[int, list[dict], list[dict]]:
-    """Upload documents from a processor to Meilisearch.
+    """Upload documents from a DocumentProcessor to Meilisearch.
 
     Args:
-        processor: A processor instance that yields documents
+        processor: A DocumentProcessor instance (callable that yields document dicts)
         client: Meilisearch client instance
         index_name: Name of the Meilisearch index
         batch_size: Number of documents per batch
         use_tqdm: Whether to show progress bar
         limit: Maximum number of source items to process
+        progress_desc: Description string for the progress bar
+        total_for_progress: Total count for progress bar (optional)
 
     Returns:
         Tuple of (total_documents_uploaded, list of response dicts, list of file errors)
@@ -248,32 +262,17 @@ def upload_from_processor(
     file_errors: list[dict[str, str]] = []
 
     # Callback to collect file errors from processor
-    def collect_error(file: str, error_msg: str):
-        file_errors.append({"file": file, "error": error_msg})
+    def collect_error(file_identifier: str, error_msg: str):
+        file_errors.append({"file": file_identifier, "error": error_msg})
 
-    # For FilesystemProcessor, we can get the metadata count for accurate progress
-    total_for_progress = None
-    if hasattr(processor, "_load_metadata"):
-        try:
-            metadata = processor._load_metadata()
-            if limit:
-                total_for_progress = min(limit, len(metadata))
-            else:
-                total_for_progress = len(metadata)
-        except Exception as e:
-            logger.error(
-                f"Failed to load metadata for progress tracking "
-                f"(index_code: {processor.index_code}): {e}"
-            )
-
-    # Get the document iterator with error callback
-    doc_iter = processor.get_documents(limit=limit, on_error=collect_error)
+    # Get document iterator from processor
+    doc_iter = processor(limit=limit, on_error=collect_error)
 
     # Wrap with tqdm if requested - stream directly, don't collect all docs
     if use_tqdm:
         doc_iter = tqdm(
             doc_iter,
-            desc=f"Processing {processor.index_code}",
+            desc=f"Processing {progress_desc}",
             total=total_for_progress,
         )
 
@@ -294,7 +293,7 @@ def upload_from_processor(
         except Exception as e:
             logger.error(
                 f"Failed to upload batch to {index_name} "
-                f"(index_code: {processor.index_code}, batch_size: {len(batch_list)}): {e}"
+                f"(index_code: {progress_desc}, batch_size: {len(batch_list)}): {e}"
             )
             responses.append(
                 {"success": False, "error": str(e), "count": len(batch_list)}
@@ -376,7 +375,9 @@ def get_batch_size(meilisearch_config: dict, index_code: str | None = None) -> i
     default_batch_size = 1000
 
     if index_code:
-        index_code_config = meilisearch_config.get("index_config", {}).get(index_code, {})
+        index_code_config = meilisearch_config.get("index_config", {}).get(
+            index_code, {}
+        )
         if "batch_size" in index_code_config:
             return int(index_code_config["batch_size"])
 
@@ -385,6 +386,127 @@ def get_batch_size(meilisearch_config: dict, index_code: str | None = None) -> i
         return int(global_config["batch_size"])
 
     return default_batch_size
+
+
+def get_metadata_count(
+    metadata_path: Path, limit: Optional[int] = None
+) -> Optional[int]:
+    """Get total metadata count for progress tracking.
+
+    Args:
+        metadata_path: Path to metadata JSONL file
+        limit: Optional limit on number of items to process
+
+    Returns:
+        Total count of metadata items (respecting limit), or None if error
+    """
+    try:
+        if not metadata_path.exists():
+            logger.warning(
+                f"Metadata file not found for progress tracking: {metadata_path}"
+            )
+            return None
+
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            metadata_text = f.read()
+
+        line_count = len(metadata_text.splitlines())
+
+        if limit is not None:
+            return min(limit, line_count)
+        return line_count
+    except Exception as e:
+        logger.error(f"Failed to count metadata items at {metadata_path}: {e}")
+        return None
+
+
+def create_processor(
+    processor_name: str,
+    index_code: str,
+    files_path: Path,
+    metadata_path: Path,
+    meilisearch_config: dict,
+    index_config: dict,
+) -> DocumentProcessor:
+    """Factory function to create document processors.
+
+    This provides a single entry point for creating all types of processors,
+    ensuring they all conform to the DocumentProcessor protocol.
+
+    To add a new processor type (e.g., for API-based sources like Lok Sabha):
+    1. Add a new case to the match statement below
+    2. Create a metadata_iterator function that yields metadata dicts
+    3. Create a file_resolver function: (file_name: str, metadata: dict) -> Path
+    4. Pass both to process_index with appropriate fetch_config
+
+    Args:
+        processor_name: Name of the processor type ("functional", or custom)
+        index_code: Index code (e.g., "AP", "KA")
+        files_path: Path to directory containing data files (optional for some processors)
+        metadata_path: Path to metadata JSONL file (optional for some processors)
+        meilisearch_config: Full Meilisearch configuration
+        index_config: Index-specific configuration (can contain custom keys for processors)
+
+    Returns:
+        A DocumentProcessor instance (callable that yields document dicts)
+
+    Raises:
+        ValueError: If processor_name is unknown
+    """
+    match processor_name:
+        case "functional":
+            # Extract configuration options
+            use_ocr = index_config.get("use_ocr", False)
+            run_ner = index_config.get("run_ner", False)
+            chunk_config_dict = index_config.get("chunk_config", None)
+
+            # Build fetch config (no file_resolver for file-based sources)
+            fetch_config = FetchConfig(
+                files_path=files_path,
+                metadata_path=metadata_path,
+                file_resolver=None,
+            )
+
+            # Build chunk config if provided
+            chunk_config = (
+                ChunkConfig(**chunk_config_dict) if chunk_config_dict else None
+            )
+
+            # Create a callable generator function that conforms to DocumentProcessor
+            def functional_processor(
+                limit: Optional[int] = None,
+                on_error: Optional[Callable[[str, str], None]] = None,
+            ) -> Iterator[dict]:
+                """Generator function for functional pipeline."""
+
+                # Create metadata iterator that reads from JSONL file line by line
+                def metadata_iterator():
+                    if not metadata_path.exists():
+                        raise FileNotFoundError(
+                            f"Metadata file not found: {metadata_path}"
+                        )
+                    with open(metadata_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            yield json.loads(line)
+
+                for doc in process_index(
+                    index_code=index_code,
+                    metadata_iterator=metadata_iterator(),
+                    fetch_config=fetch_config,
+                    limit=limit,
+                    use_ocr=use_ocr,
+                    chunk_config=chunk_config,
+                    run_ner=run_ner,
+                    on_error=on_error,
+                ):
+                    yield doc.to_dict()
+
+            return functional_processor
+
+        case _:
+            raise ValueError(
+                f"Unknown processor: {processor_name}. Known processors: functional"
+            )
 
 
 def main():
@@ -466,7 +588,9 @@ def main():
                 ]
 
                 if not index_code_index_configs:
-                    print(f"Warning: No index configs found for index code {index_code}")
+                    print(
+                        f"Warning: No index configs found for index code {index_code}"
+                    )
                     continue
 
                 for index_name, index_config in index_code_index_configs:
@@ -486,40 +610,24 @@ def main():
                         index_config,
                     )
 
-                    # Get processor type from config (default: filesystem)
-                    processor_name = index_config.get("processor", "filesystem")
+                    # Get processor type from config (default: functional)
+                    processor_name = index_config.get("processor", "functional")
 
-                    # Create the appropriate processor using match/case
-                    match processor_name:
-                        case "filesystem":
-                            processor = FilesystemProcessor(
-                                index_code=index_code,
-                                config=meilisearch_config,
-                                files_path=files_path,
-                                metadata_path=metadata_path,
-                            )
-                        case "lok_sabha":
-                            from processors.lok_sabha import LokSabhaProcessor
+                    # Get total for progress bar
+                    total_for_progress = get_metadata_count(metadata_path, args.limit)
 
-                            processor = LokSabhaProcessor(
-                                index_code=index_code,
-                                config=meilisearch_config,
-                                files_path=files_path,
-                                metadata_path=metadata_path,
-                            )
-                        case _:
-                            raise ValueError(
-                                f"Unknown processor: {processor_name}. "
-                                f"Known processors: filesystem, lok_sabha"
-                            )
-
-                    # Get batch size from config
-                    batch_size = index_config.get(
-                        "batch_size",
-                        meilisearch_config.get("index_config", {})
-                        .get("global", {})
-                        .get("batch_size", 1000),
+                    # Create processor using factory
+                    processor = create_processor(
+                        processor_name=processor_name,
+                        index_code=index_code,
+                        files_path=files_path,
+                        metadata_path=metadata_path,
+                        meilisearch_config=meilisearch_config,
+                        index_config=index_config,
                     )
+
+                    # Get batch size from config using centralized function
+                    batch_size = get_batch_size(meilisearch_config, index_code)
 
                     # Upload documents
                     try:
@@ -530,6 +638,8 @@ def main():
                             batch_size=batch_size,
                             use_tqdm=True,
                             limit=args.limit,
+                            progress_desc=index_code,
+                            total_for_progress=total_for_progress,
                         )
 
                         # Save batch responses for debugging

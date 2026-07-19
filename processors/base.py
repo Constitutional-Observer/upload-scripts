@@ -1,49 +1,28 @@
-"""Base processor interface for document processing pipelines."""
+"""Document processor interface for document processing pipelines.
 
-from abc import ABC, abstractmethod
-from typing import Callable, Optional, Iterator
+This module defines the DocumentProcessor protocol that all document processors
+must conform to. The functional pipeline approach uses plain functions that
+yield document dictionaries.
+"""
+
+from typing import Callable, Iterator, Optional, Protocol, runtime_checkable
 
 
-class BaseProcessor(ABC):
-    """Abstract base class for index-specific document processors.
+@runtime_checkable
+class DocumentProcessor(Protocol):
+    """Protocol defining the interface for document processors.
 
-    A processor is responsible for:
-    1. Loading/fetching raw documents
-    2. Extracting and normalizing metadata
-    3. Extracting/processing text content
-    4. Chunking text into Meilisearch-ready documents
+    A document processor is a callable (function) that generates documents
+    for Meilisearch indexing. All processors must accept limit and on_error
+    parameters and yield document dictionaries.
 
-    All processors yield documents with the same structure:
-    {
-        "id": str,           # Unique document ID
-        "index_code": str,   # Index identifier (e.g., "AP", "LS", "PARIVESH")
-        "file_name": str,    # Original file name
-        "chunk_id": int,     # Chunk index within the file
-        "__discussions": str, # Text content of this chunk
-        **metadata           # Normalized metadata fields
-    }
+    Example:
+        def my_processor(limit=None, on_error=None) -> Iterator[dict]:
+            for doc in ...:
+                yield doc
     """
 
-    def __init__(self, index_code: str, config: dict):
-        """Initialize the processor.
-
-        Args:
-            index_code: Index code (e.g., "AP", "LS", "PARIVESH")
-            config: Full configuration dictionary from YAML
-        """
-        self.index_code = index_code
-        self.config = config
-        self.index_code_config = self._get_index_code_config()
-
-    def _get_index_code_config(self) -> dict:
-        """Get index_code-specific config with fallback to global defaults."""
-        index_code_cfg = self.config.get("index_config", {}).get(self.index_code, {})
-        global_cfg = self.config.get("index_config", {}).get("global", {})
-        # Index_code config overrides global
-        return {**global_cfg, **index_code_cfg}
-
-    @abstractmethod
-    def get_documents(
+    def __call__(
         self,
         limit: Optional[int] = None,
         on_error: Optional[Callable[[str, str], None]] = None,
@@ -52,13 +31,19 @@ class BaseProcessor(ABC):
 
         Args:
             limit: Maximum number of source items to process (not chunks)
-            on_error: Optional callback called with (file, error_msg) for each error
+            on_error: Optional callback called with (file_identifier, error_msg)
+                     for each error. file_identifier should be a unique string
+                     identifying the source (file_name, doc_id, etc.)
 
         Yields:
-            Dictionary with document structure as described in class docstring.
+            Dictionary with document structure:
+            {
+                "id": str,           # Unique document ID
+                "index_code": str,   # Index identifier (e.g., "AP", "LS")
+                "file_name": str,    # Original file name
+                "chunk_id": int,     # Chunk index within the file
+                "__discussions": str, # Text content of this chunk
+                **metadata           # Normalized metadata fields
+            }
         """
-        pass
-
-    def get_chunk_config(self) -> dict:
-        """Get chunking configuration for this index_code."""
-        return self.index_code_config.get("chunking", {})
+        ...
