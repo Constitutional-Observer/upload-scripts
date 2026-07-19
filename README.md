@@ -110,17 +110,18 @@ python manage_collection.py <action> [options] [path]
 
 | Action | Description | Required Args |
 |--------|-------------|---------------|
-| `create` | Create indexes for indexes | `--index-codes <INDEX_CODES>` |
-| `delete` | Delete an index | `--index <NAME>` or `--index-codes <INDEX_CODES>` |
-| `upload` | Upload documents | `--index-codes <INDEX_CODES>` |
+| `create` | Create indexes (or update settings if they exist) | `--index-codes <INDEX_CODES>` |
+| `delete` / `remove` | Delete an index | `--index <NAME>` or `--index-codes <INDEX_CODES>` |
+| `upload` | Upload (upsert) documents | `--index-codes <INDEX_CODES>` |
+| `add` | Create index and upload (upsert) documents | `--index-codes <INDEX_CODES>` |
 | `print_schema` | Show index info | `--index-codes <INDEX_CODES>` |
 
 **Options:**
-- `--index-codes <CODES>`: Index codes (e.g., `KA AS TN`). Required for `upload`, `create`, and `print_schema` actions.
+- `--index-codes <CODES>`: Index codes (e.g., `KA AS TN`). Required for `upload`, `create`, `add`, and `print_schema` actions.
 - `--config <FILE>`: Config file path (default: `meilisearch_config.yaml`)
 - `--prefix <PREFIX>`: Index name prefix (default: `state_legislature_debates`)
-- `--limit <N>`: Limit documents to process (for upload action)
-- `--index <NAME>`: Index name for delete action
+- `--limit <N>`: Limit documents to process (for upload and add actions)
+- `--index <NAME>`: Index name for delete/remove action
 - `--files-path <PATH>`: Override files path from config
 - `--metadata-path <PATH>`: Override metadata path from config
 - `--index-code <CODE>`: Explicit index code (auto-derived from files_path if omitted)
@@ -129,9 +130,11 @@ python manage_collection.py <action> [options] [path]
 
 ```bash
 # Create indexes for Karnataka and Assam (creates all variants defined in config)
+# If indexes already exist, their settings (searchable attributes, embedders, etc.) are updated
 python manage_collection.py create --index-codes KA AS
 
-# Upload documents for Assam (uses paths from config)
+# Upload (upsert) documents for Assam (uses paths from config)
+# Existing documents are updated, new ones are inserted
 python manage_collection.py upload --index-codes AS
 
 # Upload with limit (test with 100 docs)
@@ -140,8 +143,13 @@ python manage_collection.py upload --index-codes AS --limit 100
 # Upload with explicit files path override
 python manage_collection.py upload --index-codes AS --files-path /custom/path/to/AS
 
+# Create and upload in one step (upserts documents, updates index settings if already present)
+python manage_collection.py add --index-codes AS
+
 # Delete an index (prompts for confirmation)
 python manage_collection.py delete --index state_legislature_debates_as
+# Or use the 'remove' alias:
+python manage_collection.py remove --index state_legislature_debates_as
 
 # Delete all indexes for an index code
 python manage_collection.py delete --index-codes AS
@@ -211,11 +219,10 @@ See [`LegislatureMetadata`](metadata_schema.py) for complete field list.
 
 ## Workflow
 
-1. **Extract**: Download files from Internet Archive, extract text (DjVu -> text)
-2. **Organize**: Place in `/datasets/<type>/<INDEX_CODE>/` with `all_metadata.json` and `downloads/`
-3. **Configure**: Create `meilisearch_config.yaml` with `files_path` and `metadata_path` for each index
-4. **Create**: `python manage_collection.py create --index-codes <CODES>`
-5. **Upload**: `python manage_collection.py upload --index-codes <CODES>`
+1. Download files from Internet Archive, extract text (DjVu -> text)
+2. Place in `/datasets/<type>/<INDEX_CODE>/` with `all_metadata.json` and `downloads/`
+3. Create `meilisearch_config.yaml` with `files_path` and `metadata_path` for each index
+4. `python manage_collection.py add --index-codes <CODES>`
 
 
 ## Benchmarking
@@ -249,6 +256,6 @@ options:
   --hybrid             Enable hybrid search with embeddings (default: False)
 ```
 
-**Note:** The `index_name` is now read from the config file using `index_config.<index_code>.index_name`. The `--index-code` argument is required when your config defines index names at the index level.
+**Note:** The `index_name` is read from the config file using `index_config.<index_code>.index_name`. The `--index-code` argument is required when your config defines index names at the index level.
 
 Queries can be found in the [wiki](https://github.com/Constitutional-Observer/wiki/tree/main/benchmarking)
