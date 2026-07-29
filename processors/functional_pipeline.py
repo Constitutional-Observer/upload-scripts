@@ -3,7 +3,7 @@
 This module implements a functional approach to the document processing pipeline
 with explicit inputs and dependency order, split into:
 - Preprocessing: fetch -> extract_text -> chunk
-- Postprocessing: add_ner -> format_document
+- Postprocessing: configurable steps -> format_document
 
 Each stage has explicit function signatures with typed parameters,
 making the data flow clear and composable.
@@ -12,11 +12,15 @@ making the data flow clear and composable.
 import json
 import logging
 import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterator, Optional
+from typing import TYPE_CHECKING
 
 from metadata_handler import normalize_metadata
+
+if TYPE_CHECKING:
+    from .postprocessing import PostprocessConfig, StepRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +110,23 @@ class Document:
         }
         # Add all metadata fields
         result.update(self.metadata)
+
+        # Add any additional attributes that were set via setattr (from postprocessing steps)
+        # These are fields like _ner or any custom step output fields
+        standard_fields = {
+            "id",
+            "index_code",
+            "file_name",
+            "chunk_id",
+            "discussions",
+            "entities",
+            "metadata",
+            "__discussions",
+        }
+        for key, value in self.__dict__.items():
+            if key not in standard_fields and not key.startswith("_"):
+                result[key] = value
+
         return result
 
 
@@ -127,7 +148,7 @@ class FetchConfig:
 
     files_path: Path = None
     metadata_path: Path = None
-    file_resolver: Optional[Callable[[str, dict], Path]] = None
+    file_resolver: Callable[[str, dict], Path] | None = None
 
 
 @dataclass
@@ -439,29 +460,36 @@ def format_document_stage(
     file_name: str,
     chunk_id: int,
     metadata: dict,
+    **extra_fields,
 ) -> Document:
     """Format a chunk into a final document ready for indexing.
 
     Args:
-        ner_result: Optional result from NER stage (if NER was run)
+        ner_result: Optional result from NER stage (if NER was run) - for backward compat
         index_code: The index code
         chunk: The text chunk
         file_name: Original file name
         chunk_id: Chunk index within the file
         metadata: Normalized metadata
+        **extra_fields: Additional fields from postprocessing steps (e.g., entities)
 
     Returns:
         Document ready for Meilisearch indexing
     """
-    # Extract entities from NER result if available
+    # Extract entities from NER result if available (backward compatibility)
     entities = []
     if ner_result is not None:
         entities = ner_result.entities
 
+    # Override with entities from extra_fields if provided
+    if "entities" in extra_fields:
+        entities = extra_fields.pop("entities")
+
     # Create document ID
     doc_id = f"{index_code}_{file_name.replace('.', '_')}_{chunk_id}"
 
-    return Document(
+    # Build initial document
+    doc = Document(
         id=doc_id,
         index_code=index_code,
         file_name=file_name,
@@ -471,6 +499,13 @@ def format_document_stage(
         entities=entities,
     )
 
+    # Add any additional fields from postprocessing steps
+    # These will be added as attributes to the Document
+    for key, value in extra_fields.items():
+        setattr(doc, key, value)
+
+    return doc
+
 
 # =============================================================================
 # Postprocessing Pipeline Orchestration
@@ -478,14 +513,20 @@ def format_document_stage(
 
 
 def run_postprocessing(
-    chunk_result: ChunkResult, index_code: str, run_ner: bool = False
+    chunk_result: ChunkResult,
+    index_code: str,
+    run_ner: bool = False,
+    postprocess_config: PostprocessConfig | None = None,
+    step_registry: StepRegistry | None = None,
 ) -> Iterator[Document]:
-    """Run the complete postprocessing pipeline: NER -> format.
+    """Run the complete postprocessing pipeline: configurable steps -> format.
 
     Args:
         chunk_result: Result from preprocessing (ChunkResult)
         index_code: The index code
-        run_ner: Whether to run NER stage (default: False)
+        run_ner: Whether to run NER stage (default: False) - for backward compatibility
+        postprocess_config: Configuration for postprocessing steps (optional)
+        step_registry: Registry of available postprocessing steps (optional)
 
     Yields:
         Document objects ready for indexing
@@ -494,21 +535,40 @@ def run_postprocessing(
     metadata = chunk_result.metadata
 
     for chunk_id, chunk in enumerate(chunk_result.chunks):
-        # Stage 4: NER (optional)
-        ner_result = None
+        # Collect results from all postprocessing steps
+        step_results: dict = {}
+
+        # Backward compatibility: run old NER if requested
         if run_ner:
             ner_result = add_ner_stage(
                 chunk=chunk, file_name=file_name, chunk_id=chunk_id, metadata=metadata
             )
+            step_results["entities"] = ner_result.entities
+
+        # Run configurable postprocessing steps if provided
+        if postprocess_config and postprocess_config.enabled:
+            from .postprocessing import run_postprocessing_steps
+
+            step_results.update(
+                run_postprocessing_steps(
+                    chunk=chunk,
+                    file_name=file_name,
+                    chunk_id=chunk_id,
+                    metadata=metadata,
+                    config=postprocess_config,
+                    registry=step_registry,
+                )
+            )
 
         # Stage 5: Format document
         document = format_document_stage(
-            ner_result=ner_result,
+            ner_result=None,
             index_code=index_code,
             chunk=chunk,
             file_name=file_name,
             chunk_id=chunk_id,
             metadata=metadata,
+            **step_results,
         )
 
         yield document
@@ -527,6 +587,8 @@ def run_full_pipeline(
     use_ocr: bool = False,
     chunk_config: ChunkConfig = None,
     run_ner: bool = False,
+    postprocess_config: PostprocessConfig | None = None,
+    step_registry: StepRegistry | None = None,
 ) -> Iterator[Document]:
     """Run the complete pipeline: preprocessing + postprocessing.
 
@@ -540,7 +602,9 @@ def run_full_pipeline(
         raw_metadata: Raw metadata for the file
         use_ocr: Whether to use OCR for text extraction (default: False)
         chunk_config: Configuration for chunking (default: max_chunk_len=200)
-        run_ner: Whether to run NER stage (default: False)
+        run_ner: Whether to run NER stage (default: False) - for backward compatibility
+        postprocess_config: Configuration for postprocessing steps (optional)
+        step_registry: Registry of available postprocessing steps (optional)
 
     Yields:
         Document objects ready for Meilisearch indexing
@@ -557,7 +621,11 @@ def run_full_pipeline(
 
     # Run postprocessing
     yield from run_postprocessing(
-        chunk_result=chunk_result, index_code=index_code, run_ner=run_ner
+        chunk_result=chunk_result,
+        index_code=index_code,
+        run_ner=run_ner,
+        postprocess_config=postprocess_config,
+        step_registry=step_registry,
     )
 
 
@@ -575,7 +643,6 @@ def load_metadata_items(metadata_path: Path) -> list[dict]:
     Returns:
         List of metadata item dictionaries
     """
-    import json
 
     if not metadata_path.exists():
         raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
@@ -586,7 +653,7 @@ def load_metadata_items(metadata_path: Path) -> list[dict]:
     return list(map(json.loads, metadata_text.splitlines()))
 
 
-def find_text_file(files: list[dict]) -> Optional[str]:
+def find_text_file(files: list[dict]) -> str | None:
     """Find the text file from a list of file entries.
 
     Looks for files ending with _djvu.txt by default.
@@ -607,11 +674,13 @@ def process_index(
     index_code: str,
     metadata_iterator: Iterator[dict],
     fetch_config: FetchConfig,
-    limit: Optional[int] = None,
+    limit: int | None = None,
     use_ocr: bool = False,
     chunk_config: ChunkConfig = None,
     run_ner: bool = False,
-    on_error: Optional[Callable[[str, str], None]] = None,
+    on_error: Callable[[str, str], None] | None = None,
+    postprocess_config: PostprocessConfig | None = None,
+    step_registry: StepRegistry | None = None,
 ) -> Iterator[Document]:
     """Process all files for a given index code.
 
@@ -630,8 +699,10 @@ def process_index(
         limit: Maximum number of files to process (default: None = all)
         use_ocr: Whether to use OCR (default: False)
         chunk_config: Configuration for chunking
-        run_ner: Whether to run NER (default: False)
+        run_ner: Whether to run NER (default: False) - for backward compatibility
         on_error: Optional callback for errors: (file_identifier, error_msg)
+        postprocess_config: Configuration for postprocessing steps (optional)
+        step_registry: Registry of available postprocessing steps (optional)
 
     Yields:
         Document objects ready for Meilisearch indexing
@@ -672,6 +743,8 @@ def process_index(
                 use_ocr=use_ocr,
                 chunk_config=chunk_config,
                 run_ner=run_ner,
+                postprocess_config=postprocess_config,
+                step_registry=step_registry,
             )
         except Exception as e:
             error_msg = (

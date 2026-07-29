@@ -5,7 +5,8 @@ must conform to. The functional pipeline approach uses plain functions that
 yield document dictionaries.
 """
 
-from typing import Callable, Iterator, Optional, Protocol, runtime_checkable
+from collections.abc import Callable, Iterator
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -24,8 +25,8 @@ class DocumentProcessor(Protocol):
 
     def __call__(
         self,
-        limit: Optional[int] = None,
-        on_error: Optional[Callable[[str, str], None]] = None,
+        limit: int | None = None,
+        on_error: Callable[[str, str], None] | None = None,
     ) -> Iterator[dict]:
         """Generate documents ready for Meilisearch indexing.
 

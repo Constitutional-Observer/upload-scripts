@@ -6,19 +6,29 @@ dependency order for processing legislative debate data.
 
 from .base import DocumentProcessor
 from .functional_pipeline import (
-    FetchConfig,
     ChunkConfig,
-    PipelineConfig,
-    Document,
-    FetchResult,
-    ExtractResult,
     ChunkResult,
+    Document,
+    ExtractResult,
+    FetchConfig,
+    FetchResult,
     NerResult,
-    run_preprocessing,
-    run_postprocessing,
-    run_full_pipeline,
-    process_index,
+    PipelineConfig,
     chunk_text,
+    process_index,
+    run_full_pipeline,
+    run_postprocessing,
+    run_preprocessing,
+)
+from .postprocessing import (
+    DEFAULT_NER_MODEL,
+    PostprocessConfig,
+    PostprocessingStep,
+    StepConfig,
+    StepRegistry,
+    resolve_postprocess_config,
+    run_postprocessing_steps,
+    step_registry,
 )
 
 __all__ = [
@@ -37,4 +47,13 @@ __all__ = [
     "run_full_pipeline",
     "process_index",
     "chunk_text",
+    # Postprocessing
+    "PostprocessingStep",
+    "StepConfig",
+    "PostprocessConfig",
+    "StepRegistry",
+    "step_registry",
+    "resolve_postprocess_config",
+    "run_postprocessing_steps",
+    "DEFAULT_NER_MODEL",
 ]

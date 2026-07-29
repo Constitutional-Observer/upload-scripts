@@ -1,25 +1,29 @@
-#!/usr/bin/env python3
-
 import argparse
 import json
 import logging
 import traceback
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Callable, Iterator, Optional
-from more_itertools import batched
 
 import meilisearch
 import meilisearch.errors
 import meilisearch.index
-from tqdm import tqdm
 import yaml
+from more_itertools import batched
+from tqdm import tqdm
 
 from metadata_schema import get_metadata_schema
 from processors.base import DocumentProcessor
 from processors.functional_pipeline import (
-    process_index,
-    FetchConfig,
     ChunkConfig,
+    FetchConfig,
+    process_index,
+)
+from processors.postprocessing import (
+    PostprocessConfig,
+    StepConfig,
+    resolve_postprocess_config,
+    step_registry,
 )
 
 logger = logging.getLogger(__name__)
@@ -240,9 +244,9 @@ def upload_from_processor(
     index_name: str,
     batch_size: int = 1000,
     use_tqdm: bool = True,
-    limit: Optional[int] = None,
+    limit: int | None = None,
     progress_desc: str = "processing",
-    total_for_progress: Optional[int] = None,
+    total_for_progress: int | None = None,
 ) -> tuple[int, list[dict], list[dict]]:
     """Upload (upsert) documents from a DocumentProcessor to Meilisearch.
 
@@ -397,9 +401,7 @@ def get_batch_size(meilisearch_config: dict, index_code: str | None = None) -> i
     return default_batch_size
 
 
-def get_metadata_count(
-    metadata_path: Path, limit: Optional[int] = None
-) -> Optional[int]:
+def get_metadata_count(metadata_path: Path, limit: int | None = None) -> int | None:
     """Get total metadata count for progress tracking.
 
     Args:
@@ -532,6 +534,187 @@ def do_upload(
                 traceback.print_exc()
 
 
+def do_postprocess(
+    index_codes_to_process: list[str],
+    client: meilisearch.Client,
+    meilisearch_config: dict,
+    args: argparse.Namespace,
+    prefix: str,
+) -> None:
+    """Apply postprocessing to existing documents in MeiliSearch.
+
+    Fetches documents from MeiliSearch for the specified index codes and runs
+    configured postprocessing steps on them. Documents are updated in place
+    with the results of the postprocessing steps.
+
+    Args:
+        index_codes_to_process: List of index codes to process
+        client: Meilisearch client instance
+        meilisearch_config: Full Meilisearch configuration
+        args: Parsed command-line arguments
+        prefix: Index name prefix
+    """
+
+    # Get all index configs
+    all_index_configs = get_index_configs(meilisearch_config, prefix)
+
+    for index_code in index_codes_to_process:
+        # Get all indexes for this index_code
+        index_code_index_configs = [
+            (name, ic, config)
+            for name, ic, config in all_index_configs
+            if ic == index_code
+        ]
+
+        if not index_code_index_configs:
+            print(f"Warning: No index configs found for index code {index_code}")
+            continue
+
+        for index_name, _, index_config in index_code_index_configs:
+            print(
+                f"\n=== Postprocessing index: {index_name} (index_code: {index_code}) ==="
+            )
+
+            # Resolve postprocessing config for this index
+            global_config = meilisearch_config.get("index_config", {}).get("global", {})
+            index_code_config = meilisearch_config.get("index_config", {}).get(
+                index_code, {}
+            )
+
+            postprocess_config = resolve_postprocess_config(
+                global_config=global_config,
+                index_code_config=index_code_config,
+                variant_config=index_config,
+            )
+
+            if not postprocess_config.enabled:
+                print(f"  Postprocessing disabled for {index_name}, skipping")
+                continue
+
+            if not postprocess_config.get_enabled_steps():
+                print(f"  No enabled postprocessing steps for {index_name}, skipping")
+                continue
+
+            # Get the index
+            collection = client.index(index_name)
+
+            # Get total document count for progress tracking
+            try:
+                total_docs = collection.get_stats().number_of_documents
+                print(f"  Processing {total_docs} documents...")
+            except Exception as e:
+                print(f"  Could not get document count: {e}")
+                total_docs = None
+
+            # Process documents in pages
+            page_size = getattr(args, "page_size", 200)
+            batch_size = getattr(args, "batch_size", 200)
+            force = getattr(args, "force", False)
+
+            processed = 0
+            skipped = 0
+            pending_updates: list[dict] = []
+
+            def flush_updates():
+                """Flush pending updates to MeiliSearch."""
+                if pending_updates:
+                    try:
+                        collection.update_documents(pending_updates, primary_key="id")
+                        pending_updates.clear()
+                    except Exception as e:
+                        print(f"  Failed to update batch: {e}")
+
+            # Fetch and process documents
+            offset = 0
+            while True:
+                try:
+                    result = collection.get_documents(
+                        {
+                            "offset": offset,
+                            "limit": page_size,
+                        }
+                    )
+                    docs = result.results
+                    if not docs:
+                        break
+
+                    for doc in docs:
+                        doc_id = doc.get("id")
+                        if not doc_id:
+                            skipped += 1
+                            continue
+
+                        # Extract fields from document
+                        text = doc.get("__discussions") or doc.get("discussions", "")
+                        file_name = doc.get("file_name", "unknown")
+                        chunk_id = doc.get("chunk_id", 0)
+                        metadata = {
+                            k: v
+                            for k, v in doc.items()
+                            if k
+                            not in [
+                                "id",
+                                "__discussions",
+                                "discussions",
+                                "file_name",
+                                "chunk_id",
+                                "entities",
+                                "_ner",
+                            ]
+                        }
+
+                        # Check if already processed (skip unless force)
+                        if not force:
+                            # Check if any of the configured steps' output fields already exist
+                            skip = True
+                            for step_config in postprocess_config.get_enabled_steps():
+                                output_field = step_config.config.get(
+                                    "output_field", step_config.name
+                                )
+                                if output_field not in doc:
+                                    skip = False
+                                    break
+                            if skip:
+                                skipped += 1
+                                continue
+
+                        # Run postprocessing steps
+                        from processors.postprocessing import run_postprocessing_steps
+
+                        step_results = run_postprocessing_steps(
+                            chunk=text,
+                            file_name=file_name,
+                            chunk_id=chunk_id,
+                            metadata=metadata,
+                            config=postprocess_config,
+                            registry=step_registry,
+                        )
+
+                        if step_results:
+                            update_doc = {"id": doc_id, **step_results}
+                            pending_updates.append(update_doc)
+
+                        processed += 1
+
+                        # Flush if batch size reached
+                        if len(pending_updates) >= batch_size:
+                            flush_updates()
+
+                    offset += len(docs)
+                    if offset >= result.total:
+                        break
+
+                except Exception as e:
+                    print(f"  Error fetching documents at offset {offset}: {e}")
+                    break
+
+            # Flush any remaining updates
+            flush_updates()
+
+            print(f"  Postprocessing completed for {index_name}")
+            print(f"    Processed: {processed}, Skipped: {skipped}")
+
+
 def create_processor(
     processor_name: str,
     index_code: str,
@@ -572,6 +755,27 @@ def create_processor(
             run_ner = index_config.get("run_ner", False)
             chunk_config_dict = index_config.get("chunk_config", None)
 
+            # NEW: Resolve postprocessing configuration
+            global_config = meilisearch_config.get("index_config", {}).get("global", {})
+            index_code_config = meilisearch_config.get("index_config", {}).get(
+                index_code, {}
+            )
+
+            postprocess_config = resolve_postprocess_config(
+                global_config=global_config,
+                index_code_config=index_code_config,
+                variant_config=index_config,
+            )
+
+            # If run_ner is True but postprocessing is disabled, enable it with NER step
+            if run_ner and not postprocess_config.enabled:
+                postprocess_config = PostprocessConfig(
+                    enabled=True, steps=[StepConfig(name="ner", enabled=True)]
+                )
+            elif run_ner and not postprocess_config.has_step("ner"):
+                # Add NER step if run_ner is True but NER step isn't configured
+                postprocess_config.steps.append(StepConfig(name="ner", enabled=True))
+
             # Build fetch config (no file_resolver for file-based sources)
             fetch_config = FetchConfig(
                 files_path=files_path,
@@ -586,8 +790,8 @@ def create_processor(
 
             # Create a callable generator function that conforms to DocumentProcessor
             def functional_processor(
-                limit: Optional[int] = None,
-                on_error: Optional[Callable[[str, str], None]] = None,
+                limit: int | None = None,
+                on_error: Callable[[str, str], None] | None = None,
             ) -> Iterator[dict]:
                 """Generator function for functional pipeline."""
 
@@ -610,6 +814,8 @@ def create_processor(
                     chunk_config=chunk_config,
                     run_ner=run_ner,
                     on_error=on_error,
+                    postprocess_config=postprocess_config,
+                    step_registry=step_registry,
                 ):
                     yield doc.to_dict()
 
@@ -627,8 +833,16 @@ def main():
     )
     parser.add_argument(
         "action",
-        choices=["delete", "create", "print_schema", "upload", "add", "remove"],
-        help="Action to perform: delete, create (or update settings), print_schema, upload (upsert), add (create+upsert), or remove (delete)",
+        choices=[
+            "delete",
+            "create",
+            "print_schema",
+            "upload",
+            "add",
+            "remove",
+            "postprocess",
+        ],
+        help="Action to perform: delete, create (or update settings), print_schema, upload (upsert), add (create+upsert), remove (delete), or postprocess (run postprocessing on existing documents)",
     )
     parser.add_argument(
         "--index-codes",
@@ -664,6 +878,24 @@ def main():
         "--metadata-path",
         help="Absolute path to metadata JSONL file (default: index_codes_path/all_metadata.json or files_path/all_metadata.json)",
     )
+    # Postprocessing-specific arguments
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-process documents even if already processed (for postprocess action)",
+    )
+    parser.add_argument(
+        "--page-size",
+        type=int,
+        default=200,
+        help="Documents fetched per request (for postprocess action, default: 200)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=200,
+        help="Documents per update request (for postprocess action, default: 200)",
+    )
 
     args = parser.parse_args()
 
@@ -697,6 +929,13 @@ def main():
             if not index_codes_to_process:
                 raise ValueError("--index-codes is required for upload action")
             do_upload(
+                index_codes_to_process, client, meilisearch_config, args, args.prefix
+            )
+        case "postprocess":
+            index_codes_to_process = args.index_codes
+            if not index_codes_to_process:
+                raise ValueError("--index-codes is required for postprocess action")
+            do_postprocess(
                 index_codes_to_process, client, meilisearch_config, args, args.prefix
             )
         case _:

@@ -46,6 +46,15 @@ index_config:
     # Default embeddings for all indexes (optional)
     # If set here, applies to all indexes unless overridden at state/variant level
     embeddings: null
+    
+    # Global postprocessing defaults
+    postprocessing:
+      enabled: true
+      steps:
+        - name: "ner"
+          enabled: true
+          model: "ai4bharat/IndicNER"
+          output_field: "entities"
 
   # State-specific configuration
   KA:
@@ -56,6 +65,13 @@ index_config:
     # Chunking configuration
     chunking:
       max_chunk_len: 200  # words per chunk
+    
+    # Postprocessing configuration for this state (overrides global)
+    postprocessing:
+      steps:
+        - name: "ner"
+          enabled: true
+          model: "custom/ka-ner-model"  # KA-specific model
     
     # Multiple index variants per state (optional)
     indexes:
@@ -75,6 +91,10 @@ index_config:
               input: ["{{text}}"]
             response: [{"embedding": ["{{embedding}}"]}]
             documentTemplate: "Document: {{doc.__discussions}}"
+      no_ner:
+        index_name: state_legislature_debates_ka_no_ner
+        postprocessing:
+          enabled: false  # Disable postprocessing for this variant
     
     # Settings that apply to all indexes for this state
     processor: filesystem  # or "lok_sabha"
@@ -98,6 +118,21 @@ Settings are resolved in this order (highest priority first):
 
 If the `embeddings` field is `null` or omitted, no embeddings will be configured for that index.
 
+**Postprocessing Configuration:**
+
+Postprocessing supports the same configuration hierarchy. Each level can configure:
+- `enabled`: Whether postprocessing is active (default: true if steps are defined)
+- `steps`: List of postprocessing steps, each with:
+  - `name`: Step name (e.g., "ner")
+  - `enabled`: Whether this step is active (default: true)
+  - Additional step-specific configuration keys
+
+Built-in steps:
+- `ner`: Named Entity Recognition using HuggingFace models. Supports:
+  - `model`: HuggingFace model identifier (default: "ai4bharat/IndicNER")
+  - `output_field`: Field name to store results (default: "entities")
+  - `device`: Torch device (cuda, mps, cpu, or None for auto)
+
 ---
 
 ## Usage
@@ -115,9 +150,10 @@ python manage_collection.py <action> [options] [path]
 | `upload` | Upload (upsert) documents | `--index-codes <INDEX_CODES>` |
 | `add` | Create index and upload (upsert) documents | `--index-codes <INDEX_CODES>` |
 | `print_schema` | Show index info | `--index-codes <INDEX_CODES>` |
+| `postprocess` | Run postprocessing steps on existing documents | `--index-codes <INDEX_CODES>` |
 
 **Options:**
-- `--index-codes <CODES>`: Index codes (e.g., `KA AS TN`). Required for `upload`, `create`, `add`, and `print_schema` actions.
+- `--index-codes <CODES>`: Index codes (e.g., `KA AS TN`). Required for `upload`, `create`, `add`, `print_schema`, and `postprocess` actions.
 - `--config <FILE>`: Config file path (default: `meilisearch_config.yaml`)
 - `--prefix <PREFIX>`: Index name prefix (default: `state_legislature_debates`)
 - `--limit <N>`: Limit documents to process (for upload and add actions)
@@ -125,6 +161,9 @@ python manage_collection.py <action> [options] [path]
 - `--files-path <PATH>`: Override files path from config
 - `--metadata-path <PATH>`: Override metadata path from config
 - `--index-code <CODE>`: Explicit index code (auto-derived from files_path if omitted)
+- `--force`: Re-process documents even if already processed (for postprocess action)
+- `--page-size <N>`: Documents fetched per request (for postprocess action, default: 200)
+- `--batch-size <N>`: Documents per update request (for postprocess action, default: 200)
 
 ### Examples
 
@@ -156,6 +195,15 @@ python manage_collection.py delete --index-codes AS
 
 # View index schema for Karnataka
 python manage_collection.py print_schema --index-codes KA
+
+# Run postprocessing on existing documents for Karnataka
+python manage_collection.py postprocess --index-codes KA
+
+# Force re-processing of documents (overwrite existing postprocessing results)
+python manage_collection.py postprocess --index-codes KA --force
+
+# Run postprocessing with custom page and batch sizes
+python manage_collection.py postprocess --index-codes KA --page-size 100 --batch-size 50
 ```
 
 ---
