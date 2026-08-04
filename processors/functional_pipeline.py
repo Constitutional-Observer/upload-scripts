@@ -159,6 +159,7 @@ class PipelineConfig:
     chunk_config: ChunkConfig = None
     fetch_config: FetchConfig = None
     run_ner: bool = False
+    extractor: str = "text"
 
 
 # =============================================================================
@@ -238,7 +239,7 @@ def fetch_stage(
 
 
 def read_text_from_path(path: Path) -> str:
-    """Read text from a file path.
+    """Read text from a plain text file path.
 
     Args:
         path: Path to the text file
@@ -250,7 +251,22 @@ def read_text_from_path(path: Path) -> str:
         return f.read()
 
 
-def ocr_from_path(path: Path) -> str:
+def extract_text_from_pdf(path: Path) -> str:
+    """Extract text from PDF using pymupdf.
+
+    Args:
+        path: Path to the PDF file
+
+    Returns:
+        Extracted text content
+    """
+    import fitz
+
+    doc = fitz.open(path)
+    return "\n".join([page.get_text() for page in doc])
+
+
+def extract_text_from_ocr(path: Path) -> str:
     """OCR a document from path.
 
     Placeholder for OCR implementation.
@@ -262,35 +278,34 @@ def ocr_from_path(path: Path) -> str:
     Returns:
         Extracted text
     """
-    # For now, just read as text (placeholder)
-    # In a real implementation, this would do actual OCR
-    logger.warning(f"OCR not implemented - falling back to text read for {path}")
-    return read_text_from_path(path)
+    # Placeholder - actual OCR implementation goes here
+    raise NotImplementedError(f"OCR extraction not implemented for {path}")
+
+
+# Static mapping of extractor names to functions
+EXTRACTOR_MAP: dict[str, Callable[[Path], str]] = {
+    "text": read_text_from_path,
+    "pymupdf": extract_text_from_pdf,
+    "ocr": extract_text_from_ocr,
+}
 
 
 def extract_text_stage(
-    fetch_result: FetchResult, use_ocr: bool = False
+    fetch_result: FetchResult, extractor: str = "text"
 ) -> ExtractResult:
-    """Extract text from a fetched document.
+    """Extract text from a fetched document using the configured extractor.
 
-    Auto-selects between OCR and text reading based on file type.
+    Uses the statically configured extractor. No file type detection or fallback.
 
     Args:
         fetch_result: Result from fetch stage
-        use_ocr: Force OCR even for text files (default: False)
+        extractor: Name of extractor to use - "text", "pymupdf", or "ocr"
 
     Returns:
         ExtractResult with extracted text, file_name, and metadata
     """
-    path = fetch_result.path
-
-    # Determine whether to use OCR based on file extension
-    # For now: .txt files are read directly, others use OCR
-    if use_ocr or path.suffix.lower() not in [".txt", ".text"]:
-        text = ocr_from_path(path)
-    else:
-        text = read_text_from_path(path)
-
+    extract_func = EXTRACTOR_MAP[extractor]
+    text = extract_func(fetch_result.path)
     return ExtractResult(
         text=text, file_name=fetch_result.file_name, metadata=fetch_result.metadata
     )
@@ -380,8 +395,8 @@ def run_preprocessing(
     fetch_config: FetchConfig,
     file_name: str,
     raw_metadata: dict,
-    use_ocr: bool = False,
     chunk_config: ChunkConfig = None,
+    extractor: str = "text",
 ) -> ChunkResult:
     """Run the complete preprocessing pipeline: normalize -> fetch -> extract -> chunk.
 
@@ -390,8 +405,8 @@ def run_preprocessing(
         fetch_config: Configuration for fetching
         file_name: Name of the file to process
         raw_metadata: Raw metadata for the file
-        use_ocr: Whether to use OCR (default: False)
         chunk_config: Configuration for chunking (default: max_chunk_len=200)
+        extractor: Name of text extractor to use - "text", "pymupdf", or "ocr"
 
     Returns:
         ChunkResult with chunks ready for postprocessing
@@ -403,7 +418,7 @@ def run_preprocessing(
     fetch_result = fetch_stage(index_code, fetch_config, file_name, normalized_metadata)
 
     # Stage 2: Extract text
-    extract_result = extract_text_stage(fetch_result, use_ocr=use_ocr)
+    extract_result = extract_text_stage(fetch_result, extractor=extractor)
 
     # Stage 3: Chunk
     chunk_result = chunk_stage(extract_result, chunk_config)
@@ -584,9 +599,9 @@ def run_full_pipeline(
     fetch_config: FetchConfig,
     file_name: str,
     raw_metadata: dict,
-    use_ocr: bool = False,
     chunk_config: ChunkConfig = None,
     run_ner: bool = False,
+    extractor: str = "text",
     postprocess_config: PostprocessConfig | None = None,
     step_registry: StepRegistry | None = None,
 ) -> Iterator[Document]:
@@ -600,9 +615,9 @@ def run_full_pipeline(
         fetch_config: Configuration for fetching (files_path, metadata_path)
         file_name: Name of the file to process
         raw_metadata: Raw metadata for the file
-        use_ocr: Whether to use OCR for text extraction (default: False)
         chunk_config: Configuration for chunking (default: max_chunk_len=200)
         run_ner: Whether to run NER stage (default: False) - for backward compatibility
+        extractor: Name of text extractor to use - "text", "pymupdf", or "ocr"
         postprocess_config: Configuration for postprocessing steps (optional)
         step_registry: Registry of available postprocessing steps (optional)
 
@@ -615,8 +630,8 @@ def run_full_pipeline(
         fetch_config=fetch_config,
         file_name=file_name,
         raw_metadata=raw_metadata,
-        use_ocr=use_ocr,
         chunk_config=chunk_config,
+        extractor=extractor,
     )
 
     # Run postprocessing
@@ -675,9 +690,9 @@ def process_index(
     metadata_iterator: Iterator[dict],
     fetch_config: FetchConfig,
     limit: int | None = None,
-    use_ocr: bool = False,
     chunk_config: ChunkConfig = None,
     run_ner: bool = False,
+    extractor: str = "text",
     on_error: Callable[[str, str], None] | None = None,
     postprocess_config: PostprocessConfig | None = None,
     step_registry: StepRegistry | None = None,
@@ -697,9 +712,9 @@ def process_index(
         fetch_config: Configuration for fetching. Use file_resolver for custom
             sources that need to download/locate files differently.
         limit: Maximum number of files to process (default: None = all)
-        use_ocr: Whether to use OCR (default: False)
         chunk_config: Configuration for chunking
         run_ner: Whether to run NER (default: False) - for backward compatibility
+        extractor: Name of text extractor to use - "text", "pymupdf", or "ocr"
         on_error: Optional callback for errors: (file_identifier, error_msg)
         postprocess_config: Configuration for postprocessing steps (optional)
         step_registry: Registry of available postprocessing steps (optional)
@@ -740,9 +755,9 @@ def process_index(
                 fetch_config=fetch_config,
                 file_name=file_name,
                 raw_metadata=raw_metadata,
-                use_ocr=use_ocr,
                 chunk_config=chunk_config,
                 run_ner=run_ner,
+                extractor=extractor,
                 postprocess_config=postprocess_config,
                 step_registry=step_registry,
             )

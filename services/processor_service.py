@@ -58,9 +58,9 @@ def create_processor(
     match processor_name:
         case "functional":
             # Extract configuration options
-            use_ocr = index_config.get("use_ocr", False)
             run_ner = index_config.get("run_ner", False)
             chunk_config_dict = index_config.get("chunk_config", None)
+            extractor = index_config.get("extractor", "text")
 
             # NEW: Resolve postprocessing configuration
             global_config = meilisearch_config.get("index_config", {}).get("global", {})
@@ -117,9 +117,9 @@ def create_processor(
                     metadata_iterator=metadata_iterator(),
                     fetch_config=fetch_config,
                     limit=limit,
-                    use_ocr=use_ocr,
                     chunk_config=chunk_config,
                     run_ner=run_ner,
+                    extractor=extractor,
                     on_error=on_error,
                     postprocess_config=postprocess_config,
                     step_registry=step_registry,
