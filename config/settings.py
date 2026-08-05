@@ -4,12 +4,9 @@ This module provides centralized configuration loading and management,
 including index configuration parsing and path resolution.
 """
 
-import yaml
-from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
 
-from metadata_schema import get_metadata_schema
+import yaml
 
 
 def get_index_configs(
@@ -17,18 +14,22 @@ def get_index_configs(
 ) -> list[tuple[str, str, dict]]:
     """Parse index config into (index_name, index_code, settings) tuples.
 
-    Supports two formats:
-    - New format: index_code with indexes variants
+    Now supports single index per index_code with multiple embeddings per index.
+
+    Format:
         index_config:
           KA:
+            index_name: "state_legislature_debates_ka"  # optional, defaults to prefix_index_code
             files_path: /path/to/KA
-            indexes:
-              default: {embeddings: null}
-              test: {embeddings: {...}}
-    - Old format: single index per index_code (backward compatible)
-        index_config:
-          KA:
-            files_path: /path/to/KA
+            embeddings:  # optional, can contain multiple embedder configs
+              my_embedder_1:
+                source: "rest"
+                dimensions: 768
+                url: "http://example.com/embeddings"
+              my_embedder_2:
+                source: "rest"
+                dimensions: 384
+                url: "http://another.com/embeddings"
 
     Args:
         meilisearch_config: Full config dict
@@ -44,28 +45,20 @@ def get_index_configs(
         if not isinstance(index_config_dict, dict):
             continue
 
-        # Check if this index_code has variant indexes
-        if "indexes" in index_config_dict:
-            # New format: multiple indexes per index_code
-            for variant_name, variant_config in index_config_dict["indexes"].items():
-                # Index name from variant config, or generate from variant name
-                index_name = variant_config.get(
-                    "index_name", f"{prefix}_{index_code.lower()}_{variant_name}"
-                )
-                # Merge index_code-level defaults with variant-specific config
-                merged_config = {**index_config_dict, **variant_config}
-                # Remove indexes key as it's organizational, not settings
-                merged_config.pop("indexes", None)
-                merged_config.pop(
-                    "index_name", None
-                )  # index_name is metadata, not a setting
-                result.append((index_name, index_code, merged_config))
-        else:
-            # Old format: single index per index_code
-            index_name = index_config_dict.get(
-                "index_name", f"{prefix}_{index_code.lower()}"
-            )
-            result.append((index_name, index_code, index_config_dict))
+        # Skip global config and embeddings config
+        if index_code in ("global", "embeddings"):
+            continue
+
+        # Extract index_name from config or generate from index_code
+        index_name = index_config_dict.get(
+            "index_name", f"{prefix}_{index_code.lower()}"
+        )
+
+        # Remove index_name from the config as it's metadata, not a setting
+        merged_config = {**index_config_dict}
+        merged_config.pop("index_name", None)
+
+        result.append((index_name, index_code, merged_config))
 
     return result
 
@@ -162,8 +155,9 @@ def get_metadata_count(metadata_path: Path, limit: int | None = None) -> int | N
         Total count of metadata items (respecting limit), or None if error
     """
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     try:
         if not metadata_path.exists():
             logger.warning(
@@ -205,7 +199,9 @@ class Settings:
         with open(self.config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
-    def get_index_configs(self, prefix: str = "state_legislature_debates") -> list[tuple[str, str, dict]]:
+    def get_index_configs(
+        self, prefix: str = "state_legislature_debates"
+    ) -> list[tuple[str, str, dict]]:
         """Get all index configurations.
 
         Args:
@@ -310,7 +306,9 @@ class Settings:
         """
         return get_batch_size(self.config, index_code)
 
-    def get_metadata_count(self, metadata_path: Path, limit: int | None = None) -> int | None:
+    def get_metadata_count(
+        self, metadata_path: Path, limit: int | None = None
+    ) -> int | None:
         """Get metadata count for progress tracking.
 
         Args:

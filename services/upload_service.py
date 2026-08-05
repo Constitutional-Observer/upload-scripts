@@ -140,7 +140,7 @@ class UploadService:
         all_index_configs = self.settings.get_index_configs(prefix)
 
         for index_code in index_codes_to_process:
-            # Get all indexes for this index_code
+            # Get the single index config for this index_code
             index_code_index_configs = [
                 (name, config)
                 for name, ic, config in all_index_configs
@@ -151,83 +151,82 @@ class UploadService:
                 print(f"Warning: No index configs found for index code {index_code}")
                 continue
 
-            for index_name, index_config in index_code_index_configs:
+            # With the new structure, there should be only one index per index_code
+            index_name, index_config = index_code_index_configs[0]
+            print(
+                f"\n=== Uploading to index: {index_name} (index_code: {index_code}) ==="
+            )
+
+            # Resolve paths from index config (falling back to index_code config)
+            files_path = self.settings.resolve_files_path(
+                args.files_path if hasattr(args, "files_path") else None,
+                index_code,
+                index_config,
+            )
+            metadata_path = self.settings.resolve_metadata_path(
+                args.metadata_path if hasattr(args, "metadata_path") else None,
+                index_code,
+                files_path,
+                index_config,
+            )
+
+            # Get processor type from config (default: functional)
+            processor_name = index_config.get("processor", "functional")
+
+            # Get total for progress bar
+            total_for_progress = self.settings.get_metadata_count(
+                metadata_path, args.limit if hasattr(args, "limit") else None
+            )
+
+            # Create processor using factory
+            processor = create_processor(
+                processor_name=processor_name,
+                index_code=index_code,
+                files_path=files_path,
+                metadata_path=metadata_path,
+                meilisearch_config=self.settings.config,
+                index_config=index_config,
+            )
+
+            # Get batch size from config
+            batch_size = self.settings.get_batch_size(index_code)
+
+            # Upload documents
+            try:
+                total_count, responses, file_errors = self.upload_from_processor(
+                    processor,
+                    index_name,
+                    batch_size=batch_size,
+                    use_tqdm=True,
+                    limit=args.limit if hasattr(args, "limit") else None,
+                    progress_desc=index_code,
+                    total_for_progress=total_for_progress,
+                    prefix=prefix,
+                )
+
+                # Save batch responses for debugging
+                response_filename = f"meilisearch_upload_{index_code}.json"
+                with open(response_filename, "w") as f:
+                    json.dump(responses, f)
+
+                # Save file errors to metadata errors file
+                error_filename = f"metadata_errors_{index_code}.json"
+                with open(error_filename, "w") as f:
+                    json.dump(file_errors, f)
+
+                # Count successful uploads
+                success_count = sum(r["count"] for r in responses if r.get("success"))
+                error_count = sum(1 for r in responses if not r.get("success"))
+
+                print(f"Upload completed for {index_name}")
+                print(f"  Total chunks uploaded: {total_count}")
                 print(
-                    f"\n=== Uploading to index: {index_name} (index_code: {index_code}) ==="
+                    f"  Batch responses: {len(responses)} ({success_count} successful, {error_count} errors)"
                 )
+                print(f"  File errors saved to: {error_filename}")
 
-                # Resolve paths from index config (falling back to index_code config)
-                files_path = self.settings.resolve_files_path(
-                    args.files_path if hasattr(args, "files_path") else None,
-                    index_code,
-                    index_config,
-                )
-                metadata_path = self.settings.resolve_metadata_path(
-                    args.metadata_path if hasattr(args, "metadata_path") else None,
-                    index_code,
-                    files_path,
-                    index_config,
-                )
+            except Exception as e:
+                print(f"Error processing index {index_name}: {e}")
+                import traceback
 
-                # Get processor type from config (default: functional)
-                processor_name = index_config.get("processor", "functional")
-
-                # Get total for progress bar
-                total_for_progress = self.settings.get_metadata_count(
-                    metadata_path, args.limit if hasattr(args, "limit") else None
-                )
-
-                # Create processor using factory
-                processor = create_processor(
-                    processor_name=processor_name,
-                    index_code=index_code,
-                    files_path=files_path,
-                    metadata_path=metadata_path,
-                    meilisearch_config=self.settings.config,
-                    index_config=index_config,
-                )
-
-                # Get batch size from config
-                batch_size = self.settings.get_batch_size(index_code)
-
-                # Upload documents
-                try:
-                    total_count, responses, file_errors = self.upload_from_processor(
-                        processor,
-                        index_name,
-                        batch_size=batch_size,
-                        use_tqdm=True,
-                        limit=args.limit if hasattr(args, "limit") else None,
-                        progress_desc=index_code,
-                        total_for_progress=total_for_progress,
-                        prefix=prefix,
-                    )
-
-                    # Save batch responses for debugging
-                    response_filename = f"meilisearch_upload_{index_code}_{index_name.replace(prefix + '_', '')}.json"
-                    with open(response_filename, "w") as f:
-                        json.dump(responses, f)
-
-                    # Save file errors to metadata errors file
-                    error_filename = f"metadata_errors_{index_code}.json"
-                    with open(error_filename, "w") as f:
-                        json.dump(file_errors, f)
-
-                    # Count successful uploads
-                    success_count = sum(
-                        r["count"] for r in responses if r.get("success")
-                    )
-                    error_count = sum(1 for r in responses if not r.get("success"))
-
-                    print(f"Upload completed for {index_name}")
-                    print(f"  Total chunks uploaded: {total_count}")
-                    print(
-                        f"  Batch responses: {len(responses)} ({success_count} successful, {error_count} errors)"
-                    )
-                    print(f"  File errors saved to: {error_filename}")
-
-                except Exception as e:
-                    print(f"Error processing index {index_name}: {e}")
-                    import traceback
-
-                    traceback.print_exc()
+                traceback.print_exc()
