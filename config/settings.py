@@ -144,6 +144,45 @@ def get_batch_size(meilisearch_config: dict, index_code: str | None = None) -> i
     return default_batch_size
 
 
+def resolve_embeddings_config(
+    meilisearch_config: dict,
+    index_code_config: dict | None,
+) -> dict | None:
+    """Resolve embeddings configuration by name references.
+
+    Embedding providers are defined at the top level under `embeddings` key.
+    Index configurations reference them by name using `embedding_refs` list.
+
+    Args:
+        meilisearch_config: Full configuration dictionary
+        index_code_config: Index code-specific configuration
+
+    Returns:
+        Resolved embeddings dictionary, or None if no embeddings configured
+    """
+    if not index_code_config:
+        return None
+
+    # Get embedding references from index config
+    embedding_refs = index_code_config.get("embedding_refs")
+    if not embedding_refs:
+        return None
+
+    # Get the global embeddings catalog
+    embeddings_catalog = meilisearch_config.get("embeddings")
+    if not embeddings_catalog:
+        return None
+
+    # Build the resolved embeddings dict by looking up each reference
+    resolved: dict = {}
+    for ref_name in embedding_refs:
+        if ref_name in embeddings_catalog:
+            resolved[ref_name] = embeddings_catalog[ref_name]
+        # Silently skip references that don't exist (could add warning if needed)
+
+    return resolved if resolved else None
+
+
 def get_metadata_count(metadata_path: Path, limit: int | None = None) -> int | None:
     """Get total metadata count for progress tracking.
 

@@ -4,7 +4,7 @@ This module provides business logic for managing search collections/indexes.
 It handles creation, deletion, and information retrieval for collections.
 """
 
-from config.settings import Settings
+from config.settings import Settings, resolve_embeddings_config
 from metadata_schema import get_metadata_schema
 from search.base import SearchBackend
 
@@ -94,8 +94,10 @@ class CollectionService:
                 )
                 self.backend.update_sortable_attributes(index_name, sortable_attributes)
 
-                # Update embedders if configured
-                embeddings_config = config.get("embeddings")
+                # Update embedders if configured (by reference lookup)
+                embeddings_config = resolve_embeddings_config(
+                    self.settings.config, config
+                )
                 if embeddings_config:
                     self.backend.update_embedders(index_name, embeddings_config)
 

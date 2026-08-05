@@ -35,6 +35,27 @@ connection:
 state_path: /path/to/datasets/legislature_debates
 metadata_path: /path/to/metadata
 
+# Embedding provider configurations - defined once and referenced by name
+embeddings:
+  jina_default:
+    source: "rest"
+    dimensions: 768
+    url: "http://your-embedding-service:8080/embeddings"
+    request:
+      model: "jinaai/jina-embeddings-v5-text-nano-retrieval"
+      input: ["{{text}}"]
+    response: [{"embedding": ["{{embedding}}"]}]
+    documentTemplate: "Document: {{doc.__discussions}}"
+  gemma_default:
+    source: "rest"
+    dimensions: 768
+    url: "http://another-embedding-service:8080/embeddings"
+    request:
+      model: "ggml-org/embeddinggemma-300M-GGUF"
+      input: ["{{text}}"]
+    response: [{"embedding": ["{{embedding}}"]}]
+    documentTemplate: "Document: {{doc.__discussions}}"
+
 index_config:
   global:
     # Default batch size for document uploads (default: 1000)
@@ -58,6 +79,7 @@ index_config:
 
   # State-specific configuration
   KA:
+    index_name: state_legislature_debates_ka  # optional, auto-generated if omitted
     # Path to data directory containing downloads/ and all_metadata.json
     files_path: /datasets/legislature_debates/KA
     metadata_path: /datasets/legislature_debates/KA/all_metadata.json
@@ -73,50 +95,57 @@ index_config:
           enabled: true
           model: "custom/ka-ner-model"  # KA-specific model
     
-    # Multiple index variants per state (optional)
-    indexes:
-      default:
-        index_name: state_legislature_debates_ka  # optional, auto-generated if omitted
-        # Override embeddings for this variant
-        embeddings: null
-      with_embeddings:
-        index_name: state_legislature_debates_ka_embeddings
-        embeddings:
-          LLAMA_JINA_PROVIDER:
-            source: "rest"
-            dimensions: 768
-            url: "http://your-embedding-service:8080/embeddings"
-            request:
-              model: "jinaai/jina-embeddings-v5-text-nano-retrieval"
-              input: ["{{text}}"]
-            response: [{"embedding": ["{{embedding}}"]}]
-            documentTemplate: "Document: {{doc.__discussions}}"
-      no_ner:
-        index_name: state_legislature_debates_ka_no_ner
-        postprocessing:
-          enabled: false  # Disable postprocessing for this variant
+    # Reference embedding providers by name (defined in top-level embeddings section)
+    embedding_refs: ["jina_default", "gemma_default"]
     
-    # Settings that apply to all indexes for this state
+    # Settings that apply to this state
     processor: filesystem  # or "lok_sabha"
     batch_size: 500  # overrides global default for this state
 
   AS:
+    index_name: state_legislature_debates_as  # optional, auto-generated if omitted
     files_path: /datasets/legislature_debates/AS
-    index_name: state_legislature_debates_as  # single index (old format still supported)
-    minWordSizeForTypos:
-      oneTypo: 1
-      twoTypos: 1
+    # No embedding_refs - this index won't have embeddings configured
 ```
 
 **Configuration Hierarchy:**
 
 Settings are resolved in this order (highest priority first):
-1. Index variant-specific config (under `indexes.<variant>`)
-2. Index-level config (under `<INDEX_CODE>`)
-3. Global config (under `index_config.global`)
-4. Built-in defaults
+1. Index-specific config (under `<INDEX_CODE>`)
+2. Global config (under `index_config.global`)
+3. Built-in defaults
 
-If the `embeddings` field is `null` or omitted, no embeddings will be configured for that index.
+**Embeddings by Reference:**
+
+Embeddings use a reference-by-name approach:
+- Embedding providers are defined once at the top level under `embeddings` key
+- Each index references which providers it wants via `embedding_refs` list
+- This eliminates duplication and makes the configuration cleaner
+
+Example:
+```yaml
+embeddings:
+  my_jina:
+    source: "rest"
+    url: "http://jina-service:8080/embeddings"
+    # ... other settings
+  my_gemma:
+    source: "rest"
+    url: "http://gemma-service:8080/embeddings"
+    # ... other settings
+
+index_config:
+  KA:
+    embedding_refs: ["my_jina", "my_gemma"]  # Use both
+  AS:
+    embedding_refs: ["my_jina"]  # Use only one
+  TG:
+    # No embedding_refs - no embeddings for this index
+```
+
+**Multiple Embeddings:**
+
+Each index can reference multiple embedding providers. Meilisearch natively supports multiple embeddings per index, so instead of creating separate indexes for different embedding models, you can simply reference multiple providers for a single index. This approach is cleaner and avoids configuration duplication entirely.
 
 **Postprocessing Configuration:**
 
