@@ -19,6 +19,7 @@ def query_meilisearch(
     client: meilisearch.Client,
     limit: int = 20,
     hybrid_search: bool = False,
+    embedder: str | None = None,
 ) -> dict:
     """Run a query and return full results including documents"""
     search_params = {
@@ -29,7 +30,10 @@ def query_meilisearch(
     }
 
     if hybrid_search:
-        search_params["hybrid"] = {"embedder": "LLAMA_JINA_PROVIDER"}
+        if embedder:
+            search_params["hybrid"] = {"embedder": embedder}
+        else:
+            raise ValueError("Hybrid search requested but no embedder specified")
 
     results = client.get_index(index_name).search(query, search_params)
     return results
@@ -38,8 +42,8 @@ def query_meilisearch(
 def get_index_metadata(
     index_name: str,
     client: meilisearch.Client,
-    meilisearch_url: str = None,
-    api_key: str = None,
+    meilisearch_url: str | None = None,
+    api_key: str | None = None,
 ) -> dict:
     """Get metadata about the index settings at the time of query"""
     index = client.get_index(index_name)
@@ -109,10 +113,21 @@ def main():
     with open(args.meilisearch_config) as f:
         config = yaml.safe_load(f)
 
-    # Determine index name - from argument, config with index code, or config global
-    index_name = config["index_config"][args.index_code]["index_name"]
+    # Determine index name - from config with index code, or generate default
+    index_config = config["index_config"].get(args.index_code, {})
+    index_name = index_config.get("index_name")
     if index_name is None:
         parser.error("index_name must be provided in config file")
+
+    # Resolve embedder from config
+    embedding_refs = index_config.get("embedding_refs", [])
+    embedder = embedding_refs[0] if embedding_refs else None
+
+    if args.hybrid and not embedder:
+        parser.error(
+            f"Index {args.index_code} has no embedders configured (embedding_refs is empty). "
+            "Cannot enable hybrid search."
+        )
 
     client = meilisearch.Client(
         config["connection"]["URL"], config["connection"]["API_KEY"]
@@ -138,6 +153,7 @@ def main():
     # Add query run metadata
     query_run_metadata = {
         "hybrid_search_enabled": args.hybrid,
+        "embedder": embedder,
         "limit": args.limit,
         "index_code": args.index_code,
         "timestamp": pd.Timestamp.now().isoformat(),
@@ -149,7 +165,7 @@ def main():
     for query in df["primary_search"].astype(str).str.strip():
         print(f"Running query: {query}")
         query_results = query_meilisearch(
-            query, index_name, client, args.limit, args.hybrid
+            query, index_name, client, args.limit, args.hybrid, embedder
         )
 
         # Store full results including hits (actual documents) for NDCG calculation
