@@ -22,6 +22,16 @@ uv sync
 source .venv/bin/activate
 ```
 
+## Infrastructure pipeline
+
+The pipeline for provisioning Vast.ai, validating vLLM,
+configuring the Meilisearch REST embedder, and indexing documents is in
+[`infra.py`](infra.py).
+
+```bash
+python infra.py --help
+```
+
 ## Configuration
 
 Create `meilisearch_config.yaml`:
