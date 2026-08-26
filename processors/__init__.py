@@ -6,6 +6,7 @@ dependency order for processing legislative debate data.
 
 from .base import DocumentProcessor
 from .functional_pipeline import (
+    CHUNKER_MAP,
     ChunkConfig,
     ChunkResult,
     Document,
@@ -15,6 +16,7 @@ from .functional_pipeline import (
     NerResult,
     PipelineConfig,
     chunk_text,
+    chunk_text_default,
     process_index,
     run_full_pipeline,
     run_postprocessing,
@@ -47,6 +49,8 @@ __all__ = [
     "run_full_pipeline",
     "process_index",
     "chunk_text",
+    "chunk_text_default",
+    "CHUNKER_MAP",
     # Postprocessing
     "PostprocessingStep",
     "StepConfig",

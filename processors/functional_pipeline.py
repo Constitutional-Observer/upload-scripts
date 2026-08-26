@@ -140,6 +140,7 @@ class ChunkConfig:
     """Configuration for chunking."""
 
     max_chunk_len: int = 200
+    chunker: str = "default"  # name of the chunker in CHUNKER_MAP
 
 
 @dataclass
@@ -370,6 +371,16 @@ def chunk_text(text: str, max_chunk_len: int = 200) -> list[str]:
     return chunks
 
 
+def chunk_text_default(text: str, chunk_config: ChunkConfig) -> list[str]:
+    """Adapter so the existing chunk_text fits the (text, ChunkConfig) contract."""
+    return chunk_text(text, max_chunk_len=chunk_config.max_chunk_len)
+
+
+CHUNKER_MAP: dict[str, Callable[[str, ChunkConfig], list[str]]] = {
+    "default": chunk_text_default,
+}
+
+
 def chunk_stage(
     extract_result: ExtractResult, chunk_config: ChunkConfig = None
 ) -> ChunkResult:
@@ -385,7 +396,13 @@ def chunk_stage(
     if chunk_config is None:
         chunk_config = ChunkConfig()
 
-    chunks = chunk_text(extract_result.text, max_chunk_len=chunk_config.max_chunk_len)
+    chunker = CHUNKER_MAP.get(chunk_config.chunker)
+    if chunker is None:
+        raise ValueError(
+            f"Unknown chunker {chunk_config.chunker!r}; "
+            f"available: {sorted(CHUNKER_MAP)}"
+        )
+    chunks = chunker(extract_result.text, chunk_config)
 
     return ChunkResult(
         chunks=chunks,
