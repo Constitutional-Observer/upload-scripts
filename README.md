@@ -95,7 +95,7 @@ index_config:
     metadata_path: /datasets/legislature_debates/KA/all_metadata.json
     
     # Chunking configuration
-    chunking:
+    chunk_config:
       max_chunk_len: 200  # words per chunk
     
     # Postprocessing configuration for this state (overrides global)
