@@ -144,11 +144,22 @@ class ChunkConfig:
 
 @dataclass
 class FetchConfig:
-    """Configuration for fetching."""
+    """Configuration for fetching.
+
+    The file_resolver, if set, owns both selecting which file to process for an
+    item and locating it as a local path. It receives the whole metadata item
+    (the dict yielded by the metadata iterator, with "files" and "metadata"
+    keys) and returns (file_name, local_path). This lets non-filesystem sources
+    (e.g. Lok Sabha, which downloads a PDF named via metadata["source_file_name"])
+    bypass the state-source _djvu.txt selection convention.
+
+    When file_resolver is None, fetch falls back to the state-source default:
+    select the _djvu.txt entry from item["files"] and resolve it under files_path.
+    """
 
     files_path: Path = None
     metadata_path: Path = None
-    file_resolver: Callable[[str, dict], Path] | None = None
+    file_resolver: Callable[[dict], tuple[str, Path]] | None = None
 
 
 @dataclass
@@ -187,52 +198,50 @@ def normalize_metadata_stage(index_code: str, raw_metadata: dict) -> dict:
 # --- Stage 1: Fetch ---
 
 
-def fetch_from_filesystem(
-    files_path: Path, metadata_path: Path, file_name: str, raw_metadata: dict
-) -> FetchResult:
-    """Fetch a document from the filesystem.
-
-    Args:
-        files_path: Path to directory containing text files
-        metadata_path: Path to metadata JSONL file
-        file_name: Name of the file to fetch
-        raw_metadata: Raw metadata for this file
-
-    Returns:
-        FetchResult with path, file_name, and metadata
-    """
-    document_path = files_path / file_name
-    if not document_path.exists():
-        raise FileNotFoundError(f"Text file not found: {document_path}")
-
-    return FetchResult(path=document_path, file_name=file_name, metadata=raw_metadata)
-
-
 def fetch_stage(
-    index_code: str, fetch_config: FetchConfig, file_name: str, raw_metadata: dict
+    index_code: str,
+    fetch_config: FetchConfig,
+    item: dict,
+    normalized_metadata: dict,
 ) -> FetchResult:
-    """Fetch stage - dispatches to appropriate fetch method.
+    """Fetch stage - select the file for an item and resolve it to a local path.
 
-    Supports both filesystem and custom file resolvers (e.g., API-based fetching).
+    Selection and resolution are both handled here. With a custom file_resolver
+    (e.g. Lok Sabha downloading a PDF named via metadata), the resolver owns both:
+    it returns (file_name, local_path) from the item. Without one, the state-source
+    default applies: pick the _djvu.txt entry from item["files"] and join it under
+    files_path.
 
     Args:
         index_code: The index code
         fetch_config: Configuration for fetching (includes optional file_resolver)
-        file_name: Name of the file to fetch
-        raw_metadata: Raw metadata for this file
+        item: The whole metadata item yielded by the iterator (has "files" and
+            "metadata" keys); passed to a custom resolver for selection
+        normalized_metadata: Normalized metadata to attach to the result
 
     Returns:
-        FetchResult with the document path and metadata
+        FetchResult with the document path, file_name, and metadata
+
+    Raises:
+        FileNotFoundError: if the selected file cannot be located on disk
     """
     if fetch_config.file_resolver:
-        document_path = fetch_config.file_resolver(file_name, raw_metadata)
+        file_name, document_path = fetch_config.file_resolver(item)
     else:
+        file_name = find_text_file(item.get("files", []))
+        if not file_name:
+            raise FileNotFoundError(
+                f"No _djvu.txt file found in files list for index_code {index_code}, "
+                f"item: {item.get('metadata', {}).get('id', 'unknown')}"
+            )
         document_path = fetch_config.files_path / file_name
 
     if not document_path.exists():
         raise FileNotFoundError(f"Text file not found: {document_path}")
 
-    return FetchResult(path=document_path, file_name=file_name, metadata=raw_metadata)
+    return FetchResult(
+        path=document_path, file_name=file_name, metadata=normalized_metadata
+    )
 
 
 # --- Stage 2: Extract Text ---
@@ -393,8 +402,7 @@ def chunk_stage(
 def run_preprocessing(
     index_code: str,
     fetch_config: FetchConfig,
-    file_name: str,
-    raw_metadata: dict,
+    item: dict,
     chunk_config: ChunkConfig = None,
     extractor: str = "text",
 ) -> ChunkResult:
@@ -403,8 +411,8 @@ def run_preprocessing(
     Args:
         index_code: The index code (e.g., "AP", "KA")
         fetch_config: Configuration for fetching
-        file_name: Name of the file to process
-        raw_metadata: Raw metadata for the file
+        item: The whole metadata item yielded by the iterator (has "files" and
+            "metadata" keys). File selection happens inside fetch_stage.
         chunk_config: Configuration for chunking (default: max_chunk_len=200)
         extractor: Name of text extractor to use - "text", "pymupdf", or "ocr"
 
@@ -412,10 +420,11 @@ def run_preprocessing(
         ChunkResult with chunks ready for postprocessing
     """
     # Stage 0: Normalize metadata
+    raw_metadata = item.get("metadata", {})
     normalized_metadata = normalize_metadata_stage(index_code, raw_metadata)
 
-    # Stage 1: Fetch
-    fetch_result = fetch_stage(index_code, fetch_config, file_name, normalized_metadata)
+    # Stage 1: Fetch (also performs file selection)
+    fetch_result = fetch_stage(index_code, fetch_config, item, normalized_metadata)
 
     # Stage 2: Extract text
     extract_result = extract_text_stage(fetch_result, extractor=extractor)
@@ -597,8 +606,7 @@ def run_postprocessing(
 def run_full_pipeline(
     index_code: str,
     fetch_config: FetchConfig,
-    file_name: str,
-    raw_metadata: dict,
+    item: dict,
     chunk_config: ChunkConfig = None,
     run_ner: bool = False,
     extractor: str = "text",
@@ -607,14 +615,15 @@ def run_full_pipeline(
 ) -> Iterator[Document]:
     """Run the complete pipeline: preprocessing + postprocessing.
 
-    This is the main entry point for processing a single file through the entire
-    pipeline from raw metadata to final indexed documents.
+    This is the main entry point for processing a single item through the entire
+    pipeline from raw metadata to final indexed documents. File selection is
+    performed inside fetch_stage (via fetch_config).
 
     Args:
         index_code: The index code (e.g., "AP", "KA")
-        fetch_config: Configuration for fetching (files_path, metadata_path)
-        file_name: Name of the file to process
-        raw_metadata: Raw metadata for the file
+        fetch_config: Configuration for fetching (files_path, metadata_path, file_resolver)
+        item: The whole metadata item yielded by the iterator (has "files" and
+            "metadata" keys)
         chunk_config: Configuration for chunking (default: max_chunk_len=200)
         run_ner: Whether to run NER stage (default: False) - for backward compatibility
         extractor: Name of text extractor to use - "text", "pymupdf", or "ocr"
@@ -628,8 +637,7 @@ def run_full_pipeline(
     chunk_result = run_preprocessing(
         index_code=index_code,
         fetch_config=fetch_config,
-        file_name=file_name,
-        raw_metadata=raw_metadata,
+        item=item,
         chunk_config=chunk_config,
         extractor=extractor,
     )
@@ -669,9 +677,12 @@ def load_metadata_items(metadata_path: Path) -> list[dict]:
 
 
 def find_text_file(files: list[dict]) -> str | None:
-    """Find the text file from a list of file entries.
+    """Select the text file from a state-source file list.
 
-    Looks for files ending with _djvu.txt by default.
+    State sources bundle many derivatives per document; the pre-extracted
+    _djvu.txt is the one the pipeline reads. This is the state-source
+    selection convention used by fetch_stage's default path and is not
+    intended to generalize to other sources.
 
     Args:
         files: List of file entry dictionaries with "name" key
@@ -697,25 +708,28 @@ def process_index(
     postprocess_config: PostprocessConfig | None = None,
     step_registry: StepRegistry | None = None,
 ) -> Iterator[Document]:
-    """Process all files for a given index code.
+    """Process all items for a given index code.
 
     This is the main entry point for the functional pipeline. It accepts a
     source-agnostic metadata iterator, making it work with both file-based
-    and API-based sources. The fetch_config can include a custom file_resolver
-    for non-filesystem sources (e.g., downloading from APIs).
+    and API-based sources. File selection lives inside fetch_stage: by default
+    it picks the _djvu.txt entry from each item's "files" list (state sources);
+    a custom file_resolver on fetch_config can instead select and locate the
+    file itself (e.g. Lok Sabha downloading a PDF named via metadata).
 
     Args:
         index_code: The index code (e.g., "AP", "KA")
-        metadata_iterator: Iterator yielding metadata dicts. Each dict should have
-            a "files" key (list of file entries) and "metadata" key (raw metadata).
-            For file-based: created from JSONL lines. For API-based: yields from API.
+        metadata_iterator: Iterator yielding metadata items. Each item is a dict
+            with a "metadata" key (raw metadata) and, for state sources, a "files"
+            key (list of file entries). For API-based sources the resolver reads
+            what it needs from the item.
         fetch_config: Configuration for fetching. Use file_resolver for custom
-            sources that need to download/locate files differently.
-        limit: Maximum number of files to process (default: None = all)
+            sources that need to select/locate files differently.
+        limit: Maximum number of items to process (default: None = all)
         chunk_config: Configuration for chunking
         run_ner: Whether to run NER (default: False) - for backward compatibility
         extractor: Name of text extractor to use - "text", "pymupdf", or "ocr"
-        on_error: Optional callback for errors: (file_identifier, error_msg)
+        on_error: Optional callback for errors: (item_identifier, error_msg)
         postprocess_config: Configuration for postprocessing steps (optional)
         step_registry: Registry of available postprocessing steps (optional)
 
@@ -723,10 +737,10 @@ def process_index(
         Document objects ready for Meilisearch indexing
     """
 
-    def report_error(file: str, error_msg: str):
+    def report_error(identifier: str, error_msg: str):
         logger.error(error_msg)
         if on_error:
-            on_error(file, error_msg)
+            on_error(identifier, error_msg)
 
     # Process each metadata item from the iterator (streaming-friendly)
     count = 0
@@ -734,27 +748,14 @@ def process_index(
         if limit and count >= limit:
             break
 
-        # Find the text file
-        file_name = find_text_file(item.get("files", []))
-        if not file_name:
-            item_id = item.get("metadata", {}).get("id", "unknown")
-            error_msg = (
-                f"No _djvu.txt file found in files list for index_code {index_code}, "
-                f"item: {item_id}"
-            )
-            report_error(item_id, error_msg)
-            continue
-
-        # Get raw metadata
-        raw_metadata = item.get("metadata", {})
+        item_id = item.get("metadata", {}).get("id", "unknown")
 
         try:
-            # Process through full pipeline
+            # Process through full pipeline (file selection happens in fetch_stage)
             yield from run_full_pipeline(
                 index_code=index_code,
                 fetch_config=fetch_config,
-                file_name=file_name,
-                raw_metadata=raw_metadata,
+                item=item,
                 chunk_config=chunk_config,
                 run_ner=run_ner,
                 extractor=extractor,
@@ -763,8 +764,8 @@ def process_index(
             )
         except Exception as e:
             error_msg = (
-                f"Failed to process file {file_name} for index_code {index_code}: {e}"
+                f"Failed to process item {item_id} for index_code {index_code}: {e}"
             )
-            report_error(file_name, error_msg)
+            report_error(item_id, error_msg)
 
         count += 1

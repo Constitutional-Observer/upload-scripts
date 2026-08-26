@@ -37,9 +37,12 @@ def create_processor(
 
     To add a new processor type (e.g., for API-based sources like Lok Sabha):
     1. Add a new case to the match statement below
-    2. Create a metadata_iterator function that yields metadata dicts
-    3. Create a file_resolver function: (file_name: str, metadata: dict) -> Path
-    4. Pass both to process_index with appropriate fetch_config
+    2. Create a metadata_iterator function that yields metadata items (dicts
+       with a "metadata" key, plus whatever the resolver needs)
+    3. Create a file_resolver function: (item: dict) -> (file_name: str, path: Path)
+       that both selects and locates the file (e.g. download a PDF named via
+       metadata["source_file_name"] to a local path)
+    4. Pass both to process_index with a fetch_config carrying the file_resolver
 
     Args:
         processor_name: Name of the processor type ("functional", or custom)
