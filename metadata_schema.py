@@ -57,7 +57,7 @@ class LegislatureMetadata(TypedDict):
     discussions: NotRequired[str]
 
 
-INDEX_CODES = ["AP", "AS", "RJ", "KA", "KL", "TN", "TS", "UP", "WB", "TG"]
+INDEX_CODES = ["AP", "AS", "RJ", "KA", "KL", "LS", "TN", "TS", "UP", "WB", "TG"]
 
 
 @dataclass
@@ -212,6 +212,14 @@ class LegislatureMetadataKL(LegislatureMetadataBase):
     subject: Annotated[str, {"facet": False, "description": "Subject"}]
 
 
+class LegislatureMetadataLS(LegislatureMetadataBase):
+    """Lok Sabha specific metadata fields"""
+
+    house: Annotated[str, {"facet": True, "description": "House"}]
+    session: Annotated[int, {"facet": True, "description": "Session"}]
+    term_number: Annotated[int, {"facet": True, "description": "Term number"}]
+
+
 class LegislatureMetadataTG(LegislatureMetadataBase):
     """Telangana specific metadata fields"""
 
@@ -244,6 +252,7 @@ INDEX_METADATA_CLASSES = {
     "AP": LegislatureMetadataAP,
     "KA": LegislatureMetadataKA,
     "KL": LegislatureMetadataKL,
+    "LS": LegislatureMetadataLS,
     "TG": LegislatureMetadataTG,
     # Indexes that only use base fields
     "AS": LegislatureMetadataBase,

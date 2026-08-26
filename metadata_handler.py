@@ -566,6 +566,25 @@ def normalize_metadata_wb(metadata: dict) -> LegislatureMetadata:
     }
 
 
+def normalize_metadata_ls(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for LS (Lok Sabha)
+    # Source JSON is already close to the normalized shape (state_code instead
+    # of index_code, plus year/month/day/title_en/house/session/term_number
+    # directly available), so this is mostly a pass-through.
+    return {
+        "index_code": "LS",
+        "languages": metadata.get("languages", []),
+        "year": metadata.get("year", 0),
+        "month": metadata.get("month", 0),
+        "day": metadata.get("day", 0),
+        "title_en": metadata.get("title_en", ""),
+        "house": metadata.get("house", "Lok Sabha"),
+        "session": metadata.get("session", 0),
+        "term_number": metadata.get("term_number", 0),
+        "archive_link": metadata.get("archive_link", ""),
+    }
+
+
 def normalize_metadata(index_code: str, metadata: dict) -> LegislatureMetadata:
     """
     Normalise the metadata, since each index has its own format
@@ -579,6 +598,8 @@ def normalize_metadata(index_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_ka(metadata)
         case "KL":
             return normalize_metadata_kl(metadata)
+        case "LS":
+            return normalize_metadata_ls(metadata)
         case "RJ":
             return normalize_metadata_rj(metadata)
         case "TG":
