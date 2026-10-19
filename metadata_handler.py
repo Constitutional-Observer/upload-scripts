@@ -360,14 +360,23 @@ def normalize_metadata_tn(metadata: dict) -> LegislatureMetadata:
     else:
         session = 0
 
+    house = (
+        "Legislative Council"
+        if metadata.get("identifier", "").startswith("TNLC")
+        else "Legislative Assembly"
+    )
+    title = str(metadata.get("tnla_subject", "") or metadata.get("title", ""))
+    if title.strip().lower() == "nan":
+        title = f"{house} sitting, {date_str}"
+
     return {
         "index_code": "TN",
         "languages": metadata.get("language", []),
         "year": year,
         "month": month,
         "day": day,
-        "title_en": metadata.get("tnla_subject", "") or metadata.get("title", ""),
-        "house": "Legislative Assembly",
+        "title_en": title,
+        "house": house,
         "session": session,
         "term_number": term_number,
         "term_start": term_start,
