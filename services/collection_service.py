@@ -63,8 +63,12 @@ class CollectionService:
             prefix: Prefix for the index name.
         """
         index_configs = self.get_index_configs(index_codes, prefix)
+        global_config = self.settings.get_global_config()
 
         for index_name, index_code, config in index_configs:
+            stop_words = config.get("stopWords", global_config.get("stopWords"))
+            prefix_search = config.get("prefixSearch", global_config.get("prefixSearch"))
+
             # Base searchable attributes
             searchable_attributes = []
             filterable_attributes = []
@@ -106,10 +110,17 @@ class CollectionService:
                     typo_config = {"minWordSizeForTypos": config["minWordSizeForTypos"]}
                     self.backend.update_typo_tolerance(index_name, typo_config)
 
+                if stop_words is not None:
+                    self.backend.update_stop_words(index_name, stop_words)
+                if prefix_search is not None:
+                    self.backend.update_prefix_search(index_name, prefix_search)
+
                 print(f"Created/updated collection: {index_name}")
                 print(f"  Searchable attributes: {searchable_attributes}")
                 print(f"  Filterable attributes: {filterable_attributes}")
                 print(f"  Sortable attributes: {sortable_attributes}")
+                print(f"  Stop words: {len(stop_words) if stop_words is not None else 'unchanged'}")
+                print(f"  Prefix search: {prefix_search or 'unchanged'}")
             except Exception as e:
                 print(f"Could not create/update collection {index_name}: {e}")
 

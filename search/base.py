@@ -157,6 +157,32 @@ class SearchBackend(ABC):
         ...
 
     @abstractmethod
+    def update_stop_words(self, index_name: str, stop_words: list[str]) -> bool:
+        """Update stop words for an index.
+
+        Args:
+            index_name: The name of the index/collection.
+            stop_words: Words ignored at search time.
+
+        Returns:
+            True if the update was successful, False otherwise.
+        """
+        ...
+
+    @abstractmethod
+    def update_prefix_search(self, index_name: str, prefix_search: str) -> bool:
+        """Update prefix search mode for an index.
+
+        Args:
+            index_name: The name of the index/collection.
+            prefix_search: "indexingTime" or "disabled".
+
+        Returns:
+            True if the update was successful, False otherwise.
+        """
+        ...
+
+    @abstractmethod
     def add_documents(
         self, index_name: str, documents: list[dict], primary_key: str
     ) -> Any:

@@ -215,6 +215,38 @@ class MeilisearchBackend(SearchBackend):
         except Exception:
             return False
 
+    def update_stop_words(self, index_name: str, stop_words: list[str]) -> bool:
+        """Update stop words for a Meilisearch index.
+
+        Args:
+            index_name: The name of the index.
+            stop_words: Words ignored at search time.
+
+        Returns:
+            True if the update was successful.
+        """
+        try:
+            self.client.index(index_name).update_stop_words(stop_words)
+            return True
+        except Exception:
+            return False
+
+    def update_prefix_search(self, index_name: str, prefix_search: str) -> bool:
+        """Update prefix search mode for a Meilisearch index.
+
+        Args:
+            index_name: The name of the index.
+            prefix_search: "indexingTime" or "disabled".
+
+        Returns:
+            True if the update was successful.
+        """
+        try:
+            self.client.index(index_name).update_prefix_search(prefix_search)
+            return True
+        except Exception:
+            return False
+
     def add_documents(
         self, index_name: str, documents: list[dict], primary_key: str
     ) -> Any:

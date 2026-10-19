@@ -74,6 +74,21 @@ index_config:
     minWordSizeForTypos:
       oneTypo: 1
       twoTypos: 1
+    # Default stop words and prefix search for all indexes.
+    # Each index can override either key in its own block.
+    stopWords: ["a", "about", "above", "after", "again", "all", "am", "an", "and", "any", "are",
+      "as", "at", "be", "because", "been", "before", "being", "below", "between",
+      "both", "but", "by", "can", "could", "did", "do", "does", "doing", "down",
+      "during", "each", "few", "for", "from", "further", "had", "has", "have",
+      "having", "he", "her", "here", "hers", "him", "his", "how", "i", "if", "in",
+      "into", "is", "it", "its", "itself", "just", "me", "more", "most", "my", "no",
+      "nor", "not", "now", "of", "off", "on", "once", "only", "or", "other", "our",
+      "out", "over", "own", "same", "say", "said", "she", "should", "so", "some",
+      "such", "than", "that", "the", "their", "them", "then", "there", "these",
+      "they", "this", "those", "through", "to", "too", "under", "until", "up", "very",
+      "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom",
+      "why", "will", "with", "would", "you", "your"]
+    prefixSearch: disabled  # or indexingTime
     # Default embeddings for all indexes (optional)
     # If set here, applies to all indexes unless overridden at state/variant level
     embeddings: null
@@ -111,6 +126,7 @@ index_config:
     # Settings that apply to this state
     processor: filesystem  # or "lok_sabha"
     batch_size: 500  # overrides global default for this state
+    prefixSearch: indexingTime  # overrides the global default for this state
 
   TN:
     files_path: /datasets/legislature_debates/TN
