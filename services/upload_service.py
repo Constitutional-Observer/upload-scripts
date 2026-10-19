@@ -100,7 +100,14 @@ class UploadService:
                 task_ids.append(task_uid)
                 total_count += len(batch_list)
                 responses.append(
-                    {"success": True, "count": len(batch_list), "task_id": task_uid}
+                    {
+                        "success": True,
+                        "count": len(batch_list),
+                        "task_id": task_uid,
+                        "files": sorted(
+                            {doc.get("file_name", "unknown") for doc in batch_list}
+                        ),
+                    }
                 )
             except Exception as e:
                 logger.error(
@@ -115,6 +122,25 @@ class UploadService:
                     file_errors.append(
                         {"file": doc.get("file_name", "unknown"), "error": str(e)}
                     )
+
+        for response in responses:
+            if not response.get("success"):
+                continue
+            try:
+                error = self.backend.get_task_error(response["task_id"])
+            except Exception as e:
+                logger.warning(f"Could not confirm task {response['task_id']}: {e}")
+                response["unconfirmed"] = str(e)
+                continue
+            if error:
+                logger.error(
+                    f"Task {response['task_id']} failed for {index_name}: {error}"
+                )
+                response["success"] = False
+                response["error"] = error
+                total_count -= response["count"]
+                for file_name in response["files"]:
+                    file_errors.append({"file": file_name, "error": error})
 
         return total_count, responses, file_errors
 

@@ -112,6 +112,12 @@ index_config:
     processor: filesystem  # or "lok_sabha"
     batch_size: 500  # overrides global default for this state
 
+  TN:
+    files_path: /datasets/legislature_debates/TN
+    # Only index items whose archive.org identifier fully matches this regex.
+    # Here: whole-day sitting records, skipping per-section slices of the same day.
+    include_identifier_regex: 'TNL[AC]-DB-[\d-]+(_(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4}))?_?'
+
   AS:
     index_name: state_legislature_debates_as  # optional, auto-generated if omitted
     files_path: /datasets/legislature_debates/AS

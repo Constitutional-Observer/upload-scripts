@@ -205,6 +205,19 @@ class SearchBackend(ABC):
         ...
 
     @abstractmethod
+    def get_task_error(self, task_uid: Any, timeout_ms: int = 600_000) -> str | None:
+        """Wait for an asynchronous indexing task and report whether it failed.
+
+        Args:
+            task_uid: The task identifier returned by add_documents.
+            timeout_ms: How long to wait for the task to finish.
+
+        Returns:
+            The error message if the task failed, None if it succeeded.
+        """
+        ...
+
+    @abstractmethod
     def get_stats(self, index_name: str) -> dict:
         """Get statistics for an index.
 

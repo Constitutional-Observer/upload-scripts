@@ -273,6 +273,21 @@ class MeilisearchBackend(SearchBackend):
         except Exception:
             return [], 0
 
+    def get_task_error(self, task_uid: Any, timeout_ms: int = 600_000) -> str | None:
+        """Wait for a Meilisearch task and report whether it failed.
+
+        Args:
+            task_uid: The task uid returned by add_documents.
+            timeout_ms: How long to wait for the task to finish.
+
+        Returns:
+            The error message if the task failed, None if it succeeded.
+        """
+        task = self.client.wait_for_task(task_uid, timeout_in_ms=timeout_ms)
+        if task.status == "failed":
+            return (task.error or {}).get("message", "task failed")
+        return None
+
     def get_stats(self, index_name: str) -> dict:
         """Get statistics for a Meilisearch index.
 

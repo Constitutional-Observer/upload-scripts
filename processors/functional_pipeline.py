@@ -527,7 +527,7 @@ def format_document_stage(
         entities = extra_fields.pop("entities")
 
     # Create document ID
-    doc_id = f"{index_code}_{file_name.replace('.', '_')}_{chunk_id}"
+    doc_id = re.sub(r"[^A-Za-z0-9_-]", "_", f"{index_code}_{file_name}_{chunk_id}")
 
     # Build initial document
     doc = Document(
