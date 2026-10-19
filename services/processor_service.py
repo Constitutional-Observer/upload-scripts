@@ -5,6 +5,7 @@ capabilities, extracting this logic from the presentation layer.
 """
 
 import json
+import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -64,6 +65,8 @@ def create_processor(
             run_ner = index_config.get("run_ner", False)
             chunk_config_dict = index_config.get("chunk_config", None)
             extractor = index_config.get("extractor", "text")
+            include_re = index_config.get("include_identifier_regex")
+            include = re.compile(include_re).fullmatch if include_re else None
 
             # NEW: Resolve postprocessing configuration
             global_config = meilisearch_config.get("index_config", {}).get("global", {})
@@ -113,7 +116,11 @@ def create_processor(
                         )
                     with open(metadata_path, "r", encoding="utf-8") as f:
                         for line in f:
-                            yield json.loads(line)
+                            item = json.loads(line)
+                            identifier = item.get("metadata", {}).get("identifier", "")
+                            if include and not include(identifier):
+                                continue
+                            yield item
 
                 for doc in process_index(
                     index_code=index_code,
