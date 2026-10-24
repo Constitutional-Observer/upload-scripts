@@ -65,6 +65,7 @@ def create_processor(
             run_ner = index_config.get("run_ner", False)
             chunk_config_dict = index_config.get("chunk_config", None)
             extractor = index_config.get("extractor", "text")
+            prechunked = index_config.get("prechunked", False)
             include_re = index_config.get("include_identifier_regex")
             include = re.compile(include_re).fullmatch if include_re else None
 
@@ -133,6 +134,7 @@ def create_processor(
                     on_error=on_error,
                     postprocess_config=postprocess_config,
                     step_registry=step_registry,
+                    prechunked=prechunked,
                 ):
                     yield doc.to_dict()
 

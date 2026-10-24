@@ -594,6 +594,25 @@ def normalize_metadata_ls(metadata: dict) -> LegislatureMetadata:
     }
 
 
+def normalize_metadata_ca(metadata: dict) -> LegislatureMetadata:
+    # Metadata handler for CA (Constituent Assembly), from
+    # scripts/scrape_ca_debates.py. "date" is the ISO sitting date.
+    year, month, day = (int(part) for part in metadata["date"].split("-"))
+    return {
+        "index_code": "CA",
+        "languages": ["en"],
+        "year": year,
+        "month": month,
+        "day": day,
+        "title_en": f"Constituent Assembly Debates, {metadata.get('title', '')}",
+        "house": "Constituent Assembly",
+        "volume": metadata.get("volume", 0),
+        "wp_term_id": metadata.get("wp_term_id", 0),
+        "description": metadata.get("description", ""),
+        "archive_link": metadata.get("link", ""),
+    }
+
+
 def normalize_metadata(index_code: str, metadata: dict) -> LegislatureMetadata:
     """
     Normalise the metadata, since each index has its own format
@@ -603,6 +622,8 @@ def normalize_metadata(index_code: str, metadata: dict) -> LegislatureMetadata:
             return normalize_metadata_ap(metadata)
         case "AS":
             return normalize_metadata_as(metadata)
+        case "CA":
+            return normalize_metadata_ca(metadata)
         case "KA":
             return normalize_metadata_ka(metadata)
         case "KL":

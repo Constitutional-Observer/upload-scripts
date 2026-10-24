@@ -50,11 +50,16 @@ class ExtractResult:
 
 @dataclass
 class ChunkResult:
-    """Result of chunking text."""
+    """Result of chunking text.
+
+    chunk_metadata, if set, holds one dict of per-chunk fields for each chunk
+    (e.g. speaker for prechunked sources); they are added to that chunk's document.
+    """
 
     chunks: list[str]
     file_name: str
     metadata: dict
+    chunk_metadata: list[dict] | None = None
 
 
 @dataclass
@@ -452,6 +457,35 @@ def run_preprocessing(
     return chunk_result
 
 
+def run_prechunked_preprocessing(index_code: str, item: dict) -> ChunkResult:
+    """Preprocessing for sources whose items already carry their chunks.
+
+    Skips fetch/extract/chunk: the item has a "chunks" list of dicts, each with
+    a "text" key plus any per-chunk fields, and file_name is the item's
+    metadata["identifier"].
+
+    Args:
+        index_code: The index code (e.g., "CA")
+        item: Metadata item with "metadata" and "chunks" keys
+
+    Returns:
+        ChunkResult with chunks and per-chunk metadata ready for postprocessing
+    """
+    raw_metadata = item.get("metadata", {})
+    normalized_metadata = normalize_metadata_stage(index_code, raw_metadata)
+
+    chunks = item.get("chunks", [])
+    return ChunkResult(
+        chunks=[chunk["text"] for chunk in chunks],
+        file_name=raw_metadata["identifier"],
+        metadata=normalized_metadata,
+        chunk_metadata=[
+            {key: value for key, value in chunk.items() if key != "text"}
+            for chunk in chunks
+        ],
+    )
+
+
 # =============================================================================
 # Postprocessing Stages
 # =============================================================================
@@ -576,8 +610,13 @@ def run_postprocessing(
     metadata = chunk_result.metadata
 
     for chunk_id, chunk in enumerate(chunk_result.chunks):
-        # Collect results from all postprocessing steps
-        step_results: dict = {}
+        # Collect results from all postprocessing steps, seeded with any
+        # per-chunk fields from a prechunked source
+        step_results: dict = (
+            dict(chunk_result.chunk_metadata[chunk_id])
+            if chunk_result.chunk_metadata
+            else {}
+        )
 
         # Backward compatibility: run old NER if requested
         if run_ner:
@@ -629,6 +668,7 @@ def run_full_pipeline(
     extractor: str = "text",
     postprocess_config: PostprocessConfig | None = None,
     step_registry: StepRegistry | None = None,
+    prechunked: bool = False,
 ) -> Iterator[Document]:
     """Run the complete pipeline: preprocessing + postprocessing.
 
@@ -646,18 +686,22 @@ def run_full_pipeline(
         extractor: Name of text extractor to use - "text", "pymupdf", or "ocr"
         postprocess_config: Configuration for postprocessing steps (optional)
         step_registry: Registry of available postprocessing steps (optional)
+        prechunked: Item already carries its chunks; skip fetch/extract/chunk
 
     Yields:
         Document objects ready for Meilisearch indexing
     """
     # Run preprocessing
-    chunk_result = run_preprocessing(
-        index_code=index_code,
-        fetch_config=fetch_config,
-        item=item,
-        chunk_config=chunk_config,
-        extractor=extractor,
-    )
+    if prechunked:
+        chunk_result = run_prechunked_preprocessing(index_code, item)
+    else:
+        chunk_result = run_preprocessing(
+            index_code=index_code,
+            fetch_config=fetch_config,
+            item=item,
+            chunk_config=chunk_config,
+            extractor=extractor,
+        )
 
     # Run postprocessing
     yield from run_postprocessing(
@@ -724,6 +768,7 @@ def process_index(
     on_error: Callable[[str, str], None] | None = None,
     postprocess_config: PostprocessConfig | None = None,
     step_registry: StepRegistry | None = None,
+    prechunked: bool = False,
 ) -> Iterator[Document]:
     """Process all items for a given index code.
 
@@ -749,6 +794,8 @@ def process_index(
         on_error: Optional callback for errors: (item_identifier, error_msg)
         postprocess_config: Configuration for postprocessing steps (optional)
         step_registry: Registry of available postprocessing steps (optional)
+        prechunked: Items already carry their chunks (see
+            run_prechunked_preprocessing); fetch_config is then unused
 
     Yields:
         Document objects ready for Meilisearch indexing
@@ -778,6 +825,7 @@ def process_index(
                 extractor=extractor,
                 postprocess_config=postprocess_config,
                 step_registry=step_registry,
+                prechunked=prechunked,
             )
         except Exception as e:
             error_msg = (

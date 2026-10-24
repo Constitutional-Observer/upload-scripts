@@ -57,7 +57,7 @@ class LegislatureMetadata(TypedDict):
     discussions: NotRequired[str]
 
 
-INDEX_CODES = ["AP", "AS", "RJ", "KA", "KL", "LS", "TN", "TS", "UP", "WB", "TG"]
+INDEX_CODES = ["AP", "AS", "CA", "RJ", "KA", "KL", "LS", "TN", "TS", "UP", "WB", "TG"]
 
 
 @dataclass
@@ -220,6 +220,30 @@ class LegislatureMetadataLS(LegislatureMetadataBase):
     term_number: Annotated[int, {"facet": True, "description": "Term number"}]
 
 
+class LegislatureMetadataCA(LegislatureMetadataBase):
+    """Constituent Assembly specific metadata fields.
+
+    speaker, speaker_referred, articles, paragraph_id and is_heading are
+    per-chunk (one chunk per paragraph from the source site).
+    """
+
+    house: Annotated[str, {"facet": True, "description": "House"}]
+    volume: Annotated[int, {"facet": True, "description": "Debate volume"}]
+    description: Annotated[str, {"facet": False, "description": "Sitting summary"}]
+    speaker: Annotated[list[str], {"facet": True, "description": "Speaker"}]
+    speaker_referred: Annotated[
+        list[str], {"facet": True, "description": "Speakers referred to"}
+    ]
+    articles: Annotated[
+        list[str],
+        {"facet": True, "description": "Source articles term ids discussed"},
+    ]
+    paragraph_id: Annotated[
+        str, {"facet": False, "description": "Source paragraph id"}
+    ]
+    is_heading: Annotated[bool, {"facet": True, "description": "Heading paragraph"}]
+
+
 class LegislatureMetadataTG(LegislatureMetadataBase):
     """Telangana specific metadata fields"""
 
@@ -250,6 +274,7 @@ class LegislatureMetadataTG(LegislatureMetadataBase):
 # Map index codes to their metadata classes
 INDEX_METADATA_CLASSES = {
     "AP": LegislatureMetadataAP,
+    "CA": LegislatureMetadataCA,
     "KA": LegislatureMetadataKA,
     "KL": LegislatureMetadataKL,
     "LS": LegislatureMetadataLS,
